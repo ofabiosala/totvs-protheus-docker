@@ -548,45 +548,26 @@ fi
 
 show_header "INICIALIZANDO DASHBOARD DE GERENCIAMENTO"
 
-DASHBOARD_DIR="$PROJECT_ROOT/dashboard"
-DASHBOARD_SCRIPT="$DASHBOARD_DIR/server.js"
 DASHBOARD_URL="http://localhost:3000"
-DASHBOARD_LOG="$DASHBOARD_DIR/dashboard.log"
 
-if command_exists node && [[ -f "$DASHBOARD_SCRIPT" ]]; then
+show_step "Aguardando resposta do Dashboard Web..."
 
-    if command_exists curl &&
-       curl --silent --fail "$DASHBOARD_URL" >/dev/null 2>&1; then
-
-        show_success "Dashboard ja esta respondendo em $DASHBOARD_URL"
-
-    else
-        mkdir -p "$DASHBOARD_DIR"
-
-        show_step "Iniciando servidor do painel Web..."
-
-        (
-            cd "$DASHBOARD_DIR"
-            nohup node "$DASHBOARD_SCRIPT" \
-                >> "$DASHBOARD_LOG" 2>&1 < /dev/null &
-        )
-
-        sleep 2
-
-        if command_exists curl &&
-           curl --silent --fail "$DASHBOARD_URL" >/dev/null 2>&1; then
-            show_success "Dashboard iniciado em $DASHBOARD_URL"
-            open_browser "$DASHBOARD_URL"
-        else
-            show_warning "O dashboard pode nao ter iniciado corretamente."
-            show_warning "Consulte o log: $DASHBOARD_LOG"
-        fi
+# Aguarda ate 15 segundos para o container subir e responder
+READY=0
+for i in {1..15}; do
+    if command_exists curl && curl --silent --fail "$DASHBOARD_URL" >/dev/null 2>&1; then
+        READY=1
+        break
     fi
+    sleep 1
+done
 
-elif ! command_exists node; then
-    show_warning "Node.js nao encontrado. Dashboard nao iniciado."
-elif [[ ! -f "$DASHBOARD_SCRIPT" ]]; then
-    show_warning "Arquivo dashboard/server.js nao encontrado."
+if [[ "$READY" -eq 1 ]]; then
+    show_success "Dashboard disponível em $DASHBOARD_URL"
+    open_browser "$DASHBOARD_URL"
+else
+    show_warning "O dashboard nao respondeu a tempo em $DASHBOARD_URL."
+    show_warning "Verifique os logs do container com: docker compose logs tp-dashboard"
 fi
 
 # ========================================================
