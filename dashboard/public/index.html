@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Protheus Docker Control</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <header>
+        <div class="header-container">
+            <h1>TOTVS Protheus - Container Manager</h1>
+            <button id="btn-refresh" class="btn-refresh">Atualizar Agora</button>
+        </div>
+    </header>
+
+    <main class="container">
+        <div id="cards-grid" class="cards-grid">
+            <!-- Cards preenchidos dinamicamente -->
+        </div>
+    </main>
+
+    <!-- Modal de Logs -->
+    <div id="modal-logs" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h2 id="modal-title">Logs: tp-db</h2>
+                    <span class="live-indicator"><span class="pulse-dot"></span> Tempo Real (2s)</span>
+                </div>
+                <button class="btn-close" onclick="closeLogs()">Fechar</button>
+            </div>
+            <div class="modal-body">
+                <pre id="log-output">Carregando logs...</pre>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
