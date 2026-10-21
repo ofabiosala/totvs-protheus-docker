@@ -1,0 +1,325 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+body {
+    background-color: #0f172a;
+    color: #f8fafc;
+    min-height: 100vh;
+}
+
+header {
+    background-color: #1e293b;
+    border-bottom: 1px solid #334155;
+    padding: 1.25rem 2rem;
+}
+
+.header-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #38bdf8;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+.cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+
+.card {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.container-name {
+    font-size: 1.1rem;
+    font-weight: bold;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    padding: 4px 8px;
+    border-radius: 9999px;
+    font-weight: 500;
+}
+
+.badge-running {
+    background-color: #064e3b;
+    color: #6ee7b7;
+}
+
+.badge-exited {
+    background-color: #7f1d1d;
+    color: #fca5a5;
+}
+
+.badge-restarting {
+    background-color: #78350f;
+    color: #fcd34d;
+}
+
+.badge-not_found {
+    background-color: #334155;
+    color: #94a3b8;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.badge-running .status-dot {
+    background-color: #10b981;
+}
+
+.badge-exited .status-dot {
+    background-color: #ef4444;
+}
+
+.badge-restarting .status-dot {
+    background-color: #f59e0b;
+}
+
+.badge-not_found .status-dot {
+    background-color: #94a3b8;
+}
+
+.card-body {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin-bottom: 1.25rem;
+    line-height: 1.4;
+}
+
+.card-body p {
+    margin-bottom: 0.35rem;
+    word-break: break-all;
+}
+
+/* Seção de Métricas (CPU e Memória) */
+.metrics-box {
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid #334155;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.metric-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.metric-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #cbd5e1;
+}
+
+.metric-bar-bg {
+    width: 100%;
+    height: 6px;
+    background-color: #0f172a;
+    border-radius: 9999px;
+    overflow: hidden;
+}
+
+.metric-bar-fill {
+    height: 100%;
+    border-radius: 9999px;
+    transition: width 0.4s ease, background-color 0.4s ease;
+}
+
+.metric-sub {
+    font-size: 0.7rem;
+    color: #64748b;
+    text-align: right;
+}
+
+.card-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+}
+
+button {
+    cursor: pointer;
+    border: none;
+    border-radius: 4px;
+    padding: 0.5rem 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    transition: opacity 0.2s;
+    text-align: center;
+}
+
+button:hover:not(:disabled) {
+    opacity: 0.85;
+}
+
+button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.btn-start {
+    background-color: #10b981;
+    color: #fff;
+}
+
+.btn-stop {
+    background-color: #ef4444;
+    color: #fff;
+}
+
+.btn-restart {
+    background-color: #0284c7;
+    color: #fff;
+}
+
+.btn-logs {
+    background-color: #475569;
+    color: #f8fafc;
+}
+
+.btn-refresh {
+    background-color: #334155;
+    color: #f8fafc;
+}
+
+.btn-close {
+    background-color: #ef4444;
+    color: #fff;
+    padding: 0.4rem 0.8rem;
+}
+
+/* Modal de Logs */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.modal-content {
+    background-color: #020617;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 950px;
+    height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+    background-color: #0f172a;
+    border-bottom: 1px solid #1e293b;
+    padding: 1rem 1.25rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h2 {
+    font-size: 1.1rem;
+    color: #38bdf8;
+}
+
+.live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: #10b981;
+    margin-top: 4px;
+}
+
+.pulse-dot {
+    width: 6px;
+    height: 6px;
+    background-color: #10b981;
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 0.3;
+    }
+
+    50% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0.3;
+    }
+}
+
+.modal-body {
+    flex: 1;
+    overflow: auto;
+    padding: 1rem;
+    background-color: #000000;
+}
+
+#log-output {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 0.82rem;
+    color: #e2e8f0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.35;
+}
