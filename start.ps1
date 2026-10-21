@@ -1,0 +1,535 @@
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+
+# ========================================================
+# CONFIGURACAO INICIAL
+# ========================================================
+
+[System.Net.ServicePointManager]::SecurityProtocol = `
+    [System.Net.SecurityProtocolType]::Tls12
+
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+$ProjectRoot = $PSScriptRoot
+
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = (Get-Location).Path
+}
+
+Set-Location -Path $ProjectRoot
+
+# ========================================================
+# INTERFACE
+# ========================================================
+
+function Show-Header {
+    param([string]$Title)
+
+    Write-Host "`n========================================================" -ForegroundColor DarkGray
+    Write-Host "  $Title" -ForegroundColor Cyan
+    Write-Host "========================================================`n" -ForegroundColor DarkGray
+}
+
+function Show-Step {
+    param([string]$Message)
+
+    Write-Host " [+] $Message" -ForegroundColor Yellow
+}
+
+function Show-Success {
+    param([string]$Message)
+
+    Write-Host " [OK] $Message" -ForegroundColor Green
+}
+
+function Show-Fail {
+    param([string]$Message)
+
+    Write-Host " [ERRO] $Message" -ForegroundColor Red
+}
+
+# ========================================================
+# VERIFICAR COMANDOS
+# ========================================================
+
+function Test-CommandExists {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CommandName
+    )
+
+    return $null -ne (
+        Get-Command -Name $CommandName -ErrorAction SilentlyContinue
+    )
+}
+
+# ========================================================
+# DOWNLOAD COM BARRA DE PROGRESSO
+# ========================================================
+
+function Download-FileWithBar {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Url,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationPath,
+
+        [int]$BarWidth = 25
+    )
+
+    Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
+
+    $httpClient = New-Object System.Net.Http.HttpClient
+    $response = $null
+    $readStream = $null
+    $fileStream = $null
+
+    try {
+        $response = $httpClient.GetAsync(
+            $Url,
+            [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
+        ).GetAwaiter().GetResult()
+
+        $null = $response.EnsureSuccessStatusCode()
+
+        $totalBytes = $response.Content.Headers.ContentLength
+
+        $readStream = $response.Content.ReadAsStreamAsync().
+        GetAwaiter().GetResult()
+
+        $fileStream = [System.IO.File]::Create($DestinationPath)
+
+        # Buffer de 1 MB
+        $buffer = [byte[]]::new(1048576)
+
+        $totalRead = [long]0
+        $lastPercent = -1
+
+        while (($bytesRead = $readStream.Read(
+                    $buffer, 0, $buffer.Length
+                )) -gt 0) {
+
+            $fileStream.Write($buffer, 0, $bytesRead)
+            $totalRead += $bytesRead
+
+            if ($null -ne $totalBytes -and $totalBytes -gt 0) {
+                $percent = [int][math]::Floor(
+                    ($totalRead / $totalBytes) * 100
+                )
+
+                if ($percent -ne $lastPercent) {
+                    $lastPercent = $percent
+
+                    $filled = [int][math]::Floor(
+                        ($percent / 100) * $BarWidth
+                    )
+
+                    $empty = $BarWidth - $filled
+                    $bar = ("#" * $filled) + ("_" * $empty)
+
+                    $curMB = [math]::Round($totalRead / 1MB, 1)
+                    $allMB = [math]::Round($totalBytes / 1MB, 1)
+
+                    Write-Host (
+                        "`r     [{0}] {1}% ({2} / {3} MB)" -f
+                        $bar, $percent, $curMB, $allMB
+                    ) -NoNewline -ForegroundColor Cyan
+                }
+            }
+            else {
+                $curMB = [math]::Round($totalRead / 1MB, 1)
+
+                Write-Host (
+                    "`r     Baixado: {0} MB..." -f $curMB
+                ) -NoNewline -ForegroundColor Cyan
+            }
+        }
+
+        if ($null -ne $totalBytes -and $totalBytes -gt 0) {
+            if ($totalRead -ne $totalBytes) {
+                throw "Download incompleto. Esperado: $totalBytes bytes. Recebido: $totalRead bytes."
+            }
+        }
+
+        Write-Host ""
+    }
+    catch {
+        Write-Host ""
+        throw
+    }
+    finally {
+        if ($null -ne $fileStream) {
+            $fileStream.Dispose()
+        }
+
+        if ($null -ne $readStream) {
+            $readStream.Dispose()
+        }
+
+        if ($null -ne $response) {
+            $response.Dispose()
+        }
+
+        $httpClient.Dispose()
+    }
+}
+
+# ========================================================
+# EXECUCAO
+# ========================================================
+
+Clear-Host
+
+Show-Header "TOTVS PROTHEUS - AMBIENTE DOCKER"
+
+# ========================================================
+# 1. VALIDAR CONFIGURACAO DE DOWNLOAD
+# ========================================================
+
+Show-Step "Validando arquivo de configuracao..."
+
+$configFile = Join-Path $ProjectRoot "config/download.json"
+
+if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) {
+    Show-Fail "Arquivo de configuracao '$configFile' nao encontrado."
+    exit 1
+}
+
+try {
+    $config = Get-Content -LiteralPath $configFile -Raw |
+    ConvertFrom-Json -ErrorAction Stop
+}
+catch {
+    Show-Fail "Nao foi possivel ler o JSON: $($_.Exception.Message)"
+    exit 1
+}
+
+$downloadUrl = [string]$config.url
+$expectedHash = ([string]$config.sha256).Trim()
+
+if (
+    [string]::IsNullOrWhiteSpace($downloadUrl) -or
+    [string]::IsNullOrWhiteSpace($expectedHash)
+) {
+    Show-Fail "O arquivo config/download.json deve conter os campos 'url' e 'sha256'."
+    exit 1
+}
+
+if ($expectedHash -notmatch '^[a-fA-F0-9]{64}$') {
+    Show-Fail "O campo sha256 deve conter exatamente 64 caracteres hexadecimais."
+    exit 1
+}
+
+Show-Success "Arquivo de configuracao validado."
+
+# ========================================================
+# 2. CRIAR DIRETORIO COMPARTILHADO
+# ========================================================
+
+$sharedDir = Join-Path $ProjectRoot "shared"
+
+if (-not (Test-Path -LiteralPath $sharedDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $sharedDir -Force |
+    Out-Null
+}
+
+$tarFile = Join-Path $sharedDir "full.tar"
+
+# ========================================================
+# 3. BAIXAR DEPENDENCIAS
+# ========================================================
+
+Show-Step "Baixando dependencias..."
+
+try {
+    Download-FileWithBar `
+        -Url $downloadUrl `
+        -DestinationPath $tarFile
+
+    Show-Success "Download concluido."
+}
+catch {
+    Show-Fail "Falha no download: $($_.Exception.Message)"
+
+    Remove-Item -LiteralPath $tarFile -Force `
+        -ErrorAction SilentlyContinue
+
+    exit 1
+}
+
+# ========================================================
+# 4. VALIDAR HASH SHA-256
+# ========================================================
+
+Show-Step "Validando hash SHA-256..."
+
+try {
+    $actualHash = (
+        Get-FileHash -LiteralPath $tarFile -Algorithm SHA256
+    ).Hash
+}
+catch {
+    Show-Fail "Nao foi possivel calcular o hash: $($_.Exception.Message)"
+    exit 1
+}
+
+if ($actualHash -ine $expectedHash) {
+    Show-Fail "O hash do arquivo nao confere!"
+
+    Write-Host "     Esperado: $expectedHash" -ForegroundColor Red
+    Write-Host "     Recebido: $actualHash" -ForegroundColor Red
+
+    Remove-Item -LiteralPath $tarFile -Force `
+        -ErrorAction SilentlyContinue
+
+    exit 1
+}
+
+Show-Success "Hash SHA-256 validado com sucesso."
+
+# ========================================================
+# 5. EXTRAIR ARQUIVO TAR
+# ========================================================
+
+Show-Step "Extraindo dependencias em '$sharedDir'..."
+
+if (-not (Test-CommandExists "tar")) {
+    Show-Fail "O comando tar nao foi encontrado no PATH."
+    exit 1
+}
+
+try {
+    & tar -xf $tarFile -C $sharedDir
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "O comando tar terminou com codigo $LASTEXITCODE."
+    }
+
+    Remove-Item -LiteralPath $tarFile -Force
+
+    Show-Success "Dependencias extraidas e arquivo temporario removido."
+}
+catch {
+    Show-Fail "Falha na extracao: $($_.Exception.Message)"
+    exit 1
+}
+
+# ========================================================
+# 6. CRIAR ESTRUTURA DE DIRETORIOS
+# ========================================================
+
+Show-Step "Criando estrutura de diretorios e arquivos..."
+
+$directories = @(
+    "docker/appserver",
+    "docker/dbaccess",
+    "docker/licenseserver",
+    "protheus_data/apo",
+    "protheus_data/system",
+    "protheus_data/data",
+    "db/init",
+    "db/backups"
+)
+
+foreach ($dir in $directories) {
+    $directoryPath = Join-Path $ProjectRoot $dir
+
+    if (-not (Test-Path -LiteralPath $directoryPath)) {
+        New-Item -ItemType Directory -Path $directoryPath -Force |
+        Out-Null
+    }
+}
+
+$files = @(
+    "docker/appserver/Dockerfile",
+    "docker/appserver/entrypoint.sh",
+    "docker/appserver/appserver.ini",
+    "docker/dbaccess/Dockerfile",
+    "docker/dbaccess/entrypoint.sh",
+    "docker/dbaccess/dbaccess.ini",
+    "docker/licenseserver/Dockerfile",
+    "docker/licenseserver/entrypoint.sh",
+    "docker/licenseserver/appserver.ini"
+)
+
+foreach ($file in $files) {
+    $filePath = Join-Path $ProjectRoot $file
+
+    if (-not (Test-Path -LiteralPath $filePath)) {
+        New-Item -ItemType File -Path $filePath -Force |
+        Out-Null
+    }
+}
+
+# Criar .dockerignore se nao existir
+$dockerIgnoreFile = Join-Path $ProjectRoot ".dockerignore"
+
+if (-not (Test-Path -LiteralPath $dockerIgnoreFile)) {
+    @(
+        "shared/",
+        "*.tar",
+        ".git/",
+        ".env"
+    ) | Set-Content -LiteralPath $dockerIgnoreFile -Encoding UTF8
+}
+
+Show-Success "Estrutura de pastas e arquivos pronta."
+
+# ========================================================
+# 7. CRIAR ARQUIVOS DE AMBIENTE
+# ========================================================
+
+$envDefault = @(
+    "POSTGRES_DB=protheus",
+    "POSTGRES_USER=postgres",
+    "POSTGRES_PASSWORD=protheus_pwd",
+    "POSTGRES_PORT=5432",
+    "APPSERVER_PORT=1234",
+    "DBACCESS_PORT=7890",
+    "LICENSESERVER_PORT=5555",
+    "SHARED_DIR=./shared"
+)
+
+$envExampleFile = Join-Path $ProjectRoot ".env.example"
+
+if (-not (Test-Path -LiteralPath $envExampleFile)) {
+    $envDefault | Set-Content `
+        -LiteralPath $envExampleFile `
+        -Encoding UTF8
+
+    Show-Success "Arquivo .env.example criado."
+}
+
+$envFile = Join-Path $ProjectRoot ".env"
+
+if (-not (Test-Path -LiteralPath $envFile)) {
+    Show-Step "Criando arquivo .env padrao..."
+
+    $envDefault | Set-Content `
+        -LiteralPath $envFile `
+        -Encoding UTF8
+
+    Show-Success "Arquivo .env criado."
+}
+else {
+    Show-Success "Arquivo .env existente preservado."
+}
+
+# ========================================================
+# 8. VALIDAR DOCKER E DOCKER COMPOSE
+# ========================================================
+
+Show-Step "Verificando Docker..."
+
+if (-not (Test-CommandExists "docker")) {
+    Show-Fail "Docker nao foi encontrado no PATH. Instale ou inicie o Docker Desktop."
+    exit 1
+}
+
+try {
+    & docker info | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Docker nao esta acessivel. Verifique se o Docker Desktop esta iniciado."
+    }
+
+    & docker compose version | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "O plugin Docker Compose nao esta disponivel."
+    }
+}
+catch {
+    Show-Fail $_.Exception.Message
+    exit 1
+}
+
+Show-Success "Docker e Docker Compose estao disponiveis."
+
+# ========================================================
+# 9. BAIXAR IMAGENS DOCKER
+# ========================================================
+
+Show-Step "Atualizando imagens Docker (PostgreSQL e Oracle Linux)..."
+
+& docker pull postgres:16
+
+if ($LASTEXITCODE -ne 0) {
+    Show-Fail "Falha ao baixar a imagem postgres:16."
+    exit 1
+}
+
+& docker pull oraclelinux:10
+
+if ($LASTEXITCODE -ne 0) {
+    Show-Fail "Falha ao baixar a imagem oraclelinux:10."
+    exit 1
+}
+
+Show-Success "Imagens atualizadas."
+
+# ========================================================
+# 10. VALIDAR CONFIGURACAO DO COMPOSE
+# ========================================================
+
+Show-Step "Validando configuracao Docker Compose..."
+
+$composeFile = Join-Path $ProjectRoot "docker-compose.yml"
+
+if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) {
+    $composeFile = Join-Path $ProjectRoot "compose.yaml"
+}
+
+if (
+    -not (Test-Path -LiteralPath $composeFile -PathType Leaf) -and
+    -not (Test-Path -LiteralPath (Join-Path $ProjectRoot "compose.yml") -PathType Leaf) -and
+    -not (Test-Path -LiteralPath (Join-Path $ProjectRoot "docker-compose.yaml") -PathType Leaf)
+) {
+    Show-Fail "Arquivo Docker Compose nao encontrado na raiz do projeto."
+    exit 1
+}
+
+& docker compose config --quiet
+
+if ($LASTEXITCODE -ne 0) {
+    Show-Fail "A configuracao Docker Compose possui erros. Verifique os arquivos YAML e o .env."
+    exit 1
+}
+
+Show-Success "Configuracao Docker Compose validada."
+
+# ========================================================
+# 11. INICIALIZAR CONTAINERS
+# ========================================================
+
+Show-Step "Inicializando containers via Docker Compose..."
+
+& docker compose up -d
+
+if ($LASTEXITCODE -ne 0) {
+    Show-Fail "Falha ao inicializar os containers."
+    Write-Host "Execute 'docker compose logs' para consultar os erros." -ForegroundColor Yellow
+    exit 1
+}
+
+Show-Success "Ambiente inicializado."
+
+# ========================================================
+# 12. STATUS DOS CONTAINERS
+# ========================================================
+
+Show-Header "STATUS DOS CONTAINERS"
+
+& docker compose ps
+
+if ($LASTEXITCODE -ne 0) {
+    Show-Fail "Nao foi possivel consultar o status dos containers."
+    exit 1
+}
+
+Show-Header "PROCESSO CONCLUIDO"
+Show-Success "Script executado sem erros."

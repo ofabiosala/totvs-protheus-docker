@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  tp-db:
+    image: postgres:16
+    container_name: tp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - ./db/data:/var/lib/postgresql/data
+      - ./db/backups:/backups
+      - ./shared:/shared
+    networks:
+      - totvs-net
+
+  tp-licenseserver:
+    image: oraclelinux:10
+    container_name: tp-licenseserver
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./licenseserver:/totvs/licenseserver
+      - ./shared:/shared
+    networks:
+      - totvs-net
+
+  tp-dbaccess:
+    image: oraclelinux:10
+    container_name: tp-dbaccess
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    depends_on:
+      - tp-db
+      - tp-licenseserver
+    volumes:
+      - ./dbaccess:/totvs/dbaccess
+      - ./shared:/shared
+    networks:
+      - totvs-net
+
+  tp-appserver:
+    image: oraclelinux:10
+    container_name: tp-appserver
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    depends_on:
+      - tp-dbaccess
+      - tp-licenseserver
+    volumes:
+      - ./appserver:/totvs/appserver
+      - ./shared:/shared
+    networks:
+      - totvs-net
+
+networks:
+  totvs-net:
+    driver: bridge
