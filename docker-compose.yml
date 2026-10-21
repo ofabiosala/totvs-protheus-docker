@@ -14,6 +14,7 @@ services:
     volumes:
       - ./db/data:/var/lib/postgresql/data
       - ./db/backups:/backups
+      - ./db/init:/docker-entrypoint-initdb.d
       - ./shared:/shared
     networks:
       - totvs-net
@@ -25,7 +26,7 @@ services:
     stdin_open: true
     tty: true
     volumes:
-      - ./licenseserver:/totvs/licenseserver
+      - ./docker/licenseserver:/totvs/licenseserver
       - ./shared:/shared
     networks:
       - totvs-net
@@ -40,7 +41,7 @@ services:
       - tp-db
       - tp-licenseserver
     volumes:
-      - ./dbaccess:/totvs/dbaccess
+      - ./docker/dbaccess:/totvs/protheus/bin/dbaccess
       - ./shared:/shared
     networks:
       - totvs-net
@@ -55,7 +56,8 @@ services:
       - tp-dbaccess
       - tp-licenseserver
     volumes:
-      - ./appserver:/totvs/appserver
+      - ./docker/appserver:/totvs/protheus/bin/appserver
+      - ./docker/appserver/apo:/totvs/protheus/bin/apo
       - ./shared:/shared
     networks:
       - totvs-net
