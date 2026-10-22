@@ -307,6 +307,7 @@ $directories = @(
     "docker/appserver",
     "docker/appserver/apo",
     "docker/smartview",
+    "protheus_data",
     "protheus_data/system",
     "protheus_data/data",
     "db/init",
@@ -364,6 +365,22 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 "@ | Set-Content -LiteralPath $DbAccessServiceFile -Encoding UTF8 -Force
+
+# Criacao do arquivo de servico do AppServer
+$AppServerServiceFile = Join-Path $ProjectRoot "config/appserver.service"
+@"
+[Unit]
+Description=TOTVS AppServer
+
+[Service]
+Type=simple
+WorkingDirectory=/totvs/protheus/bin/appserver
+ExecStart=/totvs/protheus/bin/appserver/appsrvlinux
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+"@ | Set-Content -LiteralPath $AppServerServiceFile -Encoding UTF8 -Force
 
 # Criacao dos arquivos de configuracao ODBC do DBAccess localmente
 $OdbcInstFile = Join-Path $ProjectRoot "config/dbaccess/odbcinst.ini"
@@ -641,7 +658,7 @@ $DbScriptPath = Join-Path $SharedDir "setup_db.sh"
 $DbScriptContent = @"
 #!/bin/bash
 psql -d template1 -c "ALTER USER $DbUser WITH PASSWORD '$DbPwd';" > /dev/null 2>&1
-# Tenta criar o usuario, se falhar, apenas atualiza a senha (garante compatibilidade com volumes pre-existentes)
+# Tenta criar o usuario, se falhar, apenas atualiza a senha
 psql -d template1 -tc "SELECT 1 FROM pg_roles WHERE rolname='protheus'" | grep -q 1 || psql -d template1 -c "CREATE USER protheus WITH LOGIN NOSUPERUSER INHERIT CREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT -1 PASSWORD '$DbPwd';"
 psql -d template1 -c "ALTER ROLE protheus WITH PASSWORD '$DbPwd';" > /dev/null 2>&1
 psql -d template1 -tc "SELECT 1 FROM pg_tablespace WHERE spcname='${DbName}_data'" | grep -q 1 || psql -d template1 -c "CREATE TABLESPACE ${DbName}_data OWNER protheus LOCATION '/postgres/pg_data/${DbName}/data';"
@@ -848,24 +865,91 @@ Show-Success "DBAccess configurado e inicializado com padrao TOTVS."
 # 16. CONFIGURAR BINARIOS E RPO DO APPSERVER
 # ========================================================
 
-Show-Step "Configurando binarios e RPO do AppServer..."
+Show-Step "Configurando ini, binarios e servico do AppServer nativamente..."
 
-& docker exec $AppServerContainer mkdir -p $AppServerTarget $ApoTarget
+# 16.1. Extracao dos Binarios e Diretorios
+& docker exec $AppServerContainer mkdir -p $AppServerTarget $ApoTarget /totvs/protheus/bin/log
 if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
 
 & docker exec $AppServerContainer tar -xf "/shared/$AppServerArchive" -C $AppServerTarget
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
-
 & docker exec $AppServerContainer cp "/shared/$RpoArchive" "$ApoTarget/tttm120.rpo"
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
-
-& docker exec $AppServerContainer touch "$ApoTarget/custom.rpo"
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
-
+& docker exec $AppServerContainer touch "$ApoTarget/tttm120_custom.rpo"
 & docker exec $AppServerContainer chmod -R +x $AppServerTarget
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
 
-Show-Success "Binarios e RPOs do AppServer configurados."
+# 16.2. Preenchimento dinamico do appserver.ini baseado no .env e ambiente
+$AppServerPort = $EnvVariables['APPSERVER_PORT']
+
+$AppServerIniFile = Join-Path $ProjectRoot "docker/appserver/appserver.ini"
+$AppServerIniContent = @"
+[$DbName]
+SourcePath=/totvs/protheus/apo
+RpoCustom=/totvs/protheus/apo/tttm120_custom.rpo
+RootPath=/totvs/protheus_data
+StartPath=/system/
+RpoDb=top
+RpoLanguage=Portuguese
+RpoVersion=120
+LocalFiles=CTREE
+Trace=0
+localdbextension=.dtc
+TopMemoMega=1
+PictFormat=DEFAULT
+RegionalLanguage=BRA
+SpecialKey=Prod
+StartSysInDB=1
+
+[DBAccess]
+DataBase=postgres
+Server=$DbAccessContainer
+ALIAS=$DbName
+PROTHEUSONLY=0
+
+[General]
+CONSOLELOG=1
+CONSOLEFILE=/totvs/protheus/bin/log/appsec01.log
+InstallPath=/totvs/
+CanAcceptFSRemote=1
+ASyncConsoleLog=0
+
+[Drivers]
+ACTIVE=TCP
+MultiProtocolPortSecure=1
+MultiProtocolPort=1
+
+[TCP]
+TYPE=TCPIP
+PORT=$AppServerPort
+
+[LICENSECLIENT]
+SERVER=$LicenseServerContainer
+PORT=$LicensePort
+
+[WEBAPP]
+Port=1235
+"@
+
+$AppServerIniContent = $AppServerIniContent.Replace("`r`n", "`n")
+[System.IO.File]::WriteAllText($AppServerIniFile, $AppServerIniContent, [System.Text.Encoding]::ASCII)
+
+# 16.3. Ativar e Iniciar o Servico do AppServer (via mapeamento do systemd)
+& docker exec $AppServerContainer systemctl daemon-reload
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar systemctl daemon-reload no AppServer." }
+
+& docker exec $AppServerContainer systemctl enable appserver
+& docker exec $AppServerContainer systemctl start appserver
+
+Start-Sleep -Seconds 3
+
+Write-Host "`n Status do Servico (AppServer):" -ForegroundColor Cyan
+& docker exec $AppServerContainer systemctl --no-pager status appserver
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n Logs de erro do Journalctl (AppServer):" -ForegroundColor Red
+    & docker exec $AppServerContainer journalctl -xeu appserver --no-pager | Select-Object -Last 15
+    Invoke-Die "Falha ao inicializar o servico do AppServer nativamente." 
+}
+
+Show-Success "AppServer configurado e inicializado com sucesso (TCP: $AppServerPort, WebApp: 1235)."
 
 # ========================================================
 # 17. CONFIGURAR E INICIAR BINARIOS DO SMART VIEW (MODO RAIZ)
