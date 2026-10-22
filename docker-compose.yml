@@ -23,10 +23,13 @@ services:
     image: oraclelinux:10
     container_name: tp-licenseserver
     restart: unless-stopped
-    stdin_open: true
-    tty: true
+    privileged: true
+    command: /sbin/init
+    ports:
+      - "5555:5555"
     volumes:
       - ./docker/licenseserver:/totvs/licenseserver
+      - ./config/license-server.service:/etc/systemd/system/license-server.service
       - ./shared:/shared
     networks:
       - totvs-net
@@ -70,6 +73,7 @@ services:
     command: /sbin/init
     depends_on:
       - tp-db
+      - tp-licenseserver
     ports:
       - "7019:7019"
     volumes:

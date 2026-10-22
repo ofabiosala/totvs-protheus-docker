@@ -331,7 +331,24 @@ foreach ($file in $files) {
     }
 }
 
-# Criacao do arquivo de servico do Smart View localmente (SOBRESCREVE O ANTIGO COM -Force)
+# Criacao do arquivo de servico do License Server
+$LicenseServiceFile = Join-Path $ProjectRoot "config/license-server.service"
+@"
+[Unit]
+Description=TOTVS License Server
+
+[Service]
+Type=simple
+WorkingDirectory=/totvs/licenseserver/bin/appserver
+ExecStart=/totvs/licenseserver/bin/appserver/appsrvlinux
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+"@ | Set-Content -LiteralPath $LicenseServiceFile -Encoding UTF8 -Force
+
+
+# Criacao do arquivo de servico do Smart View
 $SmartViewServiceFile = Join-Path $ProjectRoot "config/smart-view-agent.service"
 @"
 [Unit]
@@ -544,10 +561,10 @@ foreach ($archive in $RequiredArchives) {
 Show-Success "Arquivos de binarios encontrados."
 
 # ========================================================
-# 13. CONFIGURAR BINARIOS DO LICENSE SERVER
+# 13. CONFIGURAR E INICIAR O LICENSE SERVER (MODO RAIZ)
 # ========================================================
 
-Show-Step "Configurando binarios do License Server..."
+Show-Step "Configurando binarios e servico do License Server nativamente..."
 
 & docker exec $LicenseServerContainer mkdir -p $LicenseServerTarget
 if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao criar o diretorio no container '$LicenseServerContainer'." }
@@ -558,7 +575,30 @@ if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao extrair os binarios do License S
 & docker exec $LicenseServerContainer chmod -R +x $LicenseServerTarget
 if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao ajustar as permissoes dos binarios do License Server." }
 
-Show-Success "Binarios do License Server configurados."
+# Criacao da pasta destino caso nao exista e copia da lib fundamental
+& docker exec $LicenseServerContainer mkdir -p /lib/x86_64-linux-gnu
+& docker exec $LicenseServerContainer cp /totvs/licenseserver/bin/appserver/libbtmonitor.so /lib/x86_64-linux-gnu/
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao copiar libbtmonitor.so." }
+
+# Ativar e Iniciar o Servico
+& docker exec $LicenseServerContainer systemctl daemon-reload
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar systemctl daemon-reload." }
+
+& docker exec $LicenseServerContainer systemctl enable license-server
+& docker exec $LicenseServerContainer systemctl start license-server
+
+Start-Sleep -Seconds 3
+
+Write-Host "`n Status do Servico (License Server):" -ForegroundColor Cyan
+& docker exec $LicenseServerContainer systemctl --no-pager status license-server
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n Logs de erro do Journalctl (License Server):" -ForegroundColor Red
+    & docker exec $LicenseServerContainer journalctl -xeu license-server --no-pager | Select-Object -Last 15
+    Invoke-Die "Falha ao inicializar o servico do License Server nativamente." 
+}
+
+Show-Success "License Server configurado e inicializado."
 
 # ========================================================
 # 14. CONFIGURAR BINARIOS DO DBACCESS
@@ -606,33 +646,27 @@ Show-Success "Binarios e RPOs do AppServer configurados."
 
 Show-Step "Configurando binarios e servico do Smart View nativamente..."
 
-# 16.1. Garantir que ferramentas e bibliotecas necessarias (.NET/ICU) existam na imagem base
 & docker exec $SmartViewContainer bash -c "dnf install -y unzip libicu krb5-libs zlib openssl-libs >/dev/null 2>&1"
 
-# 16.2. Extrair binarios em /usr/sbin/smart-view
 & docker exec $SmartViewContainer mkdir -p $SmartViewTarget
 & docker exec $SmartViewContainer bash -c "unzip -qo /shared/$SmartViewArchive -d $SmartViewTarget"
 if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao extrair os binarios do Smart View no container." }
 
-# Garante permissao de execucao no binario real
 & docker exec $SmartViewContainer bash -c "chmod +x $SmartViewTarget/TReports.Agent"
 
-# 16.3. Ativar e Iniciar o Servico (O arquivo ja esta mapeado pelo Compose)
 & docker exec $SmartViewContainer systemctl daemon-reload
 if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar systemctl daemon-reload." }
 
 & docker exec $SmartViewContainer systemctl enable smart-view-agent
 & docker exec $SmartViewContainer systemctl start smart-view-agent
 
-# Aguarda 3 segundos para garantir que o processo nao caiu instantaneamente
 Start-Sleep -Seconds 3
 
-Write-Host "`n Status do Servico no SO Interno:" -ForegroundColor Cyan
+Write-Host "`n Status do Servico (Smart View):" -ForegroundColor Cyan
 & docker exec $SmartViewContainer systemctl --no-pager status smart-view-agent
 
-# Se o comando status falhar, exibe o log de erro real
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "`n Logs de erro do Journalctl:" -ForegroundColor Red
+    Write-Host "`n Logs de erro do Journalctl (Smart View):" -ForegroundColor Red
     & docker exec $SmartViewContainer journalctl -xeu smart-view-agent --no-pager | Select-Object -Last 15
     Invoke-Die "Falha ao inicializar o servico do Smart View nativamente." 
 }
@@ -662,7 +696,6 @@ Show-Step "Aguardando resposta do Dashboard Web..."
 
 $Ready = $false
 
-# Aguarda ate 15 segundos para o container subir e responder
 for ($i = 1; $i -le 15; $i++) {
     try {
         $null = Invoke-WebRequest -Uri $DashboardUrl -UseBasicParsing -ErrorAction Stop

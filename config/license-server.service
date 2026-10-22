@@ -1,0 +1,11 @@
+﻿[Unit]
+Description=TOTVS License Server
+
+[Service]
+Type=simple
+WorkingDirectory=/totvs/licenseserver/bin/appserver
+ExecStart=/totvs/licenseserver/bin/appserver/appsrvlinux
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
