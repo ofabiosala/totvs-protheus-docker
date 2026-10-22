@@ -25,6 +25,7 @@ $EnvFile = Join-Path $ProjectRoot ".env"
 $EnvExampleFile = Join-Path $ProjectRoot ".env.example"
 
 # Containers
+$DbContainer = "tp-db"
 $LicenseServerContainer = "tp-licenseserver"
 $DbAccessContainer = "tp-dbaccess"
 $AppServerContainer = "tp-appserver"
@@ -539,7 +540,68 @@ if ($LASTEXITCODE -ne 0) {
 Show-Success "Ambiente inicializado."
 
 # ========================================================
-# 12. VALIDAR ARQUIVOS DE BINARIOS
+# 12. CONFIGURAR BANCO DE DADOS (POSTGRESQL)
+# ========================================================
+
+Show-Step "Configurando Banco de Dados (PostgreSQL)..."
+
+Write-Host "     Aguardando o banco de dados ficar online..." -ForegroundColor Cyan
+$dbReady = $false
+for ($i = 1; $i -le 30; $i++) {
+    & docker exec -u postgres $DbContainer pg_isready -t 1 > $null 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $dbReady = $true
+        break
+    }
+    Start-Sleep -Seconds 2
+}
+
+if (-not $dbReady) { Invoke-Die "O PostgreSQL nao respondeu a tempo." }
+
+# Instalacao de pacotes
+& docker exec $DbContainer bash -c "apt-get update >/dev/null 2>&1 && apt-get install -y postgresql postgresql-contrib unixodbc unixodbc-dev odbc-postgresql >/dev/null 2>&1"
+
+# Diretorios e Permissoes
+& docker exec $DbContainer bash -c 'mkdir -p /postgres/pg_data/$POSTGRES_DB/data /postgres/pg_data/$POSTGRES_DB/index /postgres/pg_data/$POSTGRES_DB/backup'
+& docker exec $DbContainer bash -c 'chown -R postgres:postgres /postgres'
+
+# Construcao do script bash a ser executado internamente pelo usuario postgres
+$DbScriptPath = Join-Path $SharedDir "setup_db.sh"
+$DbScriptContent = @'
+#!/bin/bash
+# 1. Atualizar senha do admin
+psql -d template1 -c "ALTER USER $POSTGRES_USER WITH PASSWORD '$POSTGRES_PASSWORD';" > /dev/null 2>&1
+
+# 2. Criar o usuario protheus (Ignora o erro se ja existir)
+psql -d template1 -tc "SELECT 1 FROM pg_roles WHERE rolname='protheus'" | grep -q 1 || psql -d template1 -c "CREATE USER protheus WITH LOGIN NOSUPERUSER INHERIT CREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT -1 PASSWORD 'protheus';"
+
+# 3. Criar as Tablespaces (Ignora o erro se ja existirem)
+psql -d template1 -tc "SELECT 1 FROM pg_tablespace WHERE spcname='${POSTGRES_DB}_data'" | grep -q 1 || psql -d template1 -c "CREATE TABLESPACE ${POSTGRES_DB}_data OWNER protheus LOCATION '/postgres/pg_data/$POSTGRES_DB/data';"
+psql -d template1 -tc "SELECT 1 FROM pg_tablespace WHERE spcname='${POSTGRES_DB}_index'" | grep -q 1 || psql -d template1 -c "CREATE TABLESPACE ${POSTGRES_DB}_index OWNER protheus LOCATION '/postgres/pg_data/$POSTGRES_DB/index';"
+
+# 4. Checar se o banco de dados ja foi movido para a tablespace correta.
+DB_READY=$(psql -d template1 -tc "SELECT 1 FROM pg_database WHERE datname='$POSTGRES_DB' AND dattablespace = (SELECT oid FROM pg_tablespace WHERE spcname='${POSTGRES_DB}_data')")
+
+if echo "$DB_READY" | grep -q 1; then
+    echo "Banco de dados ja configurado corretamente nas tablespaces dedicadas."
+else
+    psql -d template1 -c "DROP DATABASE IF EXISTS $POSTGRES_DB;"
+    psql -d template1 -c "CREATE DATABASE $POSTGRES_DB WITH OWNER protheus TEMPLATE template0 ENCODING 'WIN1252' LC_COLLATE 'C' LC_CTYPE 'C' TABLESPACE ${POSTGRES_DB}_data CONNECTION LIMIT -1;"
+fi
+'@
+
+# Forca quebras de linha no padrao Linux (LF) e salva sem BOM (Encoding ASCII) para evitar erros de sintaxe no Bash
+$DbScriptContent = $DbScriptContent.Replace("`r`n", "`n")
+[System.IO.File]::WriteAllText($DbScriptPath, $DbScriptContent, [System.Text.Encoding]::ASCII)
+
+# Executa o script direto com o superusuario do banco (substituindo a necessidade do "su postgres" e "passwd")
+& docker exec -u postgres $DbContainer bash /shared/setup_db.sh
+Remove-Item -LiteralPath $DbScriptPath -Force
+
+Show-Success "Banco de dados provisionado nativamente via script interno."
+
+# ========================================================
+# 13. VALIDAR ARQUIVOS DE BINARIOS
 # ========================================================
 
 Show-Step "Validando integridade dos arquivos extraídos..."
@@ -561,7 +623,7 @@ foreach ($archive in $RequiredArchives) {
 Show-Success "Arquivos de binarios encontrados."
 
 # ========================================================
-# 13. CONFIGURAR E INICIAR O LICENSE SERVER (MODO RAIZ)
+# 14. CONFIGURAR E INICIAR O LICENSE SERVER (MODO RAIZ)
 # ========================================================
 
 Show-Step "Configurando binarios e servico do License Server nativamente..."
@@ -601,7 +663,7 @@ if ($LASTEXITCODE -ne 0) {
 Show-Success "License Server configurado e inicializado."
 
 # ========================================================
-# 14. CONFIGURAR BINARIOS DO DBACCESS
+# 15. CONFIGURAR BINARIOS DO DBACCESS
 # ========================================================
 
 Show-Step "Configurando binarios do DBAccess..."
@@ -618,7 +680,7 @@ if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$
 Show-Success "Binarios do DBAccess configurados."
 
 # ========================================================
-# 15. CONFIGURAR BINARIOS E RPO DO APPSERVER
+# 16. CONFIGURAR BINARIOS E RPO DO APPSERVER
 # ========================================================
 
 Show-Step "Configurando binarios e RPO do AppServer..."
@@ -641,7 +703,7 @@ if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$
 Show-Success "Binarios e RPOs do AppServer configurados."
 
 # ========================================================
-# 16. CONFIGURAR E INICIAR BINARIOS DO SMART VIEW (MODO RAIZ)
+# 17. CONFIGURAR E INICIAR BINARIOS DO SMART VIEW (MODO RAIZ)
 # ========================================================
 
 Show-Step "Configurando binarios e servico do Smart View nativamente..."
@@ -674,7 +736,7 @@ if ($LASTEXITCODE -ne 0) {
 Show-Success "Binarios do Smart View configurados e inicializados nativamente via systemd."
 
 # ========================================================
-# 17. STATUS DOS CONTAINERS
+# 18. STATUS DOS CONTAINERS
 # ========================================================
 
 Show-Header "STATUS DOS CONTAINERS"
@@ -686,7 +748,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ========================================================
-# 18. INICIALIZAR DASHBOARD WEB
+# 19. INICIALIZAR DASHBOARD WEB
 # ========================================================
 
 Show-Header "INICIALIZANDO DASHBOARD DE GERENCIAMENTO"
