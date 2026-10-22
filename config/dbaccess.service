@@ -1,0 +1,11 @@
+﻿[Unit]
+Description=TOTVS DBAccess
+
+[Service]
+Type=simple
+WorkingDirectory=/totvs/protheus/bin/dbaccess
+ExecStart=/totvs/protheus/bin/dbaccess/multi/dbaccess64
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

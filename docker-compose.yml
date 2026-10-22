@@ -38,13 +38,20 @@ services:
     image: oraclelinux:10
     container_name: tp-dbaccess
     restart: unless-stopped
-    stdin_open: true
-    tty: true
+    privileged: true
+    command: /sbin/init
     depends_on:
       - tp-db
       - tp-licenseserver
+    ports:
+      - "${DBACCESS_PORT:-7890}:7890"
     volumes:
       - ./docker/dbaccess:/totvs/protheus/bin/dbaccess
+      # Correcao: O arquivo INI deve acompanhar o executavel na pasta multi
+      - ./config/dbaccess.service:/etc/systemd/system/dbaccess.service
+      - ./docker/dbaccess/dbaccess.ini:/totvs/protheus/bin/dbaccess/multi/dbaccess.ini
+      - ./config/dbaccess/odbcinst.ini:/totvs/config/odbcinst.ini
+      - ./config/dbaccess/odbc.ini:/totvs/config/odbc.ini
       - ./shared:/shared
     networks:
       - totvs-net

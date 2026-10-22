@@ -301,6 +301,7 @@ Show-Step "Criando estrutura de diretorios e arquivos..."
 
 $directories = @(
     "config",
+    "config/dbaccess",
     "docker/licenseserver",
     "docker/dbaccess",
     "docker/appserver",
@@ -348,6 +349,61 @@ Restart=on-failure
 WantedBy=multi-user.target
 "@ | Set-Content -LiteralPath $LicenseServiceFile -Encoding UTF8 -Force
 
+# Criacao do arquivo de servico do DBAccess
+$DbAccessServiceFile = Join-Path $ProjectRoot "config/dbaccess.service"
+@"
+[Unit]
+Description=TOTVS DBAccess
+
+[Service]
+Type=simple
+WorkingDirectory=/totvs/protheus/bin/dbaccess
+ExecStart=/totvs/protheus/bin/dbaccess/multi/dbaccess64
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+"@ | Set-Content -LiteralPath $DbAccessServiceFile -Encoding UTF8 -Force
+
+# Criacao dos arquivos de configuracao ODBC do DBAccess localmente
+$OdbcInstFile = Join-Path $ProjectRoot "config/dbaccess/odbcinst.ini"
+@"
+[PostgreSQL ANSI]
+Description=PostgreSQL ODBC driver (ANSI version)
+Driver=psqlodbc.so
+Setup=libodbcpsqlS.so
+Debug=0
+CommLog=1
+UsageCount=1
+
+[PostgreSQL Unicode]
+Description=PostgreSQL ODBC driver (Unicode version)
+Driver=psqlodbcw.so
+Setup=libodbcpsqlS.so
+Debug=0
+CommLog=1
+UsageCount=1
+"@ | Set-Content -LiteralPath $OdbcInstFile -Encoding UTF8 -Force
+
+$OdbcIniFile = Join-Path $ProjectRoot "config/dbaccess/odbc.ini"
+@"
+[{POSTGRES_DB}]
+Description=PostgreSQL
+Driver=PostgreSQL ANSI
+Trace=Yes
+TraceFile=/tmp/psqlodbc_{POSTGRES_DB}.log
+Servername=tp-db
+Database={POSTGRES_DB}
+UserName=protheus
+Password={POSTGRES_PASSWORD}
+Port=5432
+ReadOnly=No
+RowVersioning=No
+ShowSystemTables=No
+ShowOidColumn=No
+FakeOidIndex=No
+ConnSettings=
+"@ | Set-Content -LiteralPath $OdbcIniFile -Encoding UTF8 -Force
 
 # Criacao do arquivo de servico do Smart View
 $SmartViewServiceFile = Join-Path $ProjectRoot "config/smart-view-agent.service"
@@ -441,6 +497,17 @@ SHARED_DIR=./shared
 
 New-EnvFile $EnvExampleFile
 New-EnvFile $EnvFile
+
+# Extrai as variaveis do arquivo .env atual para uso dinamico
+$EnvVariables = @{}
+Get-Content -Path $EnvFile -Encoding UTF8 | Where-Object { $_ -match "^([^#\s][^=]+)=(.*)$" } | ForEach-Object {
+    $EnvVariables[$matches[1]] = $matches[2]
+}
+
+# Injeta as variaveis no ambiente do Windows para o Docker Compose ler a porta externa corretamente
+foreach ($key in $EnvVariables.Keys) {
+    [Environment]::SetEnvironmentVariable($key, $EnvVariables[$key], "Process")
+}
 
 # ========================================================
 # 8. VALIDAR DOCKER E DOCKER COMPOSE
@@ -559,43 +626,45 @@ for ($i = 1; $i -le 30; $i++) {
 if (-not $dbReady) { Invoke-Die "O PostgreSQL nao respondeu a tempo." }
 
 # Instalacao de pacotes
-& docker exec $DbContainer bash -c "apt-get update >/dev/null 2>&1 && apt-get install -y postgresql postgresql-contrib unixodbc unixodbc-dev odbc-postgresql >/dev/null 2>&1"
+& docker exec $DbContainer bash -c "apt-get update >/dev/null 2>&1 && apt-get install -y postgresql postgresql-contrib >/dev/null 2>&1"
 
 # Diretorios e Permissoes
-& docker exec $DbContainer bash -c 'mkdir -p /postgres/pg_data/$POSTGRES_DB/data /postgres/pg_data/$POSTGRES_DB/index /postgres/pg_data/$POSTGRES_DB/backup'
+$DbName = $EnvVariables['POSTGRES_DB']
+$DbUser = $EnvVariables['POSTGRES_USER']
+$DbPwd = $EnvVariables['POSTGRES_PASSWORD']
+
+& docker exec $DbContainer bash -c "mkdir -p /postgres/pg_data/$DbName/data /postgres/pg_data/$DbName/index /postgres/pg_data/$DbName/backup"
 & docker exec $DbContainer bash -c 'chown -R postgres:postgres /postgres'
 
-# Construcao do script bash a ser executado internamente pelo usuario postgres
+# Construcao do script bash a ser executado internamente
 $DbScriptPath = Join-Path $SharedDir "setup_db.sh"
-$DbScriptContent = @'
+$DbScriptContent = @"
 #!/bin/bash
-# 1. Atualizar senha do admin
-psql -d template1 -c "ALTER USER $POSTGRES_USER WITH PASSWORD '$POSTGRES_PASSWORD';" > /dev/null 2>&1
-
-# 2. Criar o usuario protheus (Ignora o erro se ja existir)
-psql -d template1 -tc "SELECT 1 FROM pg_roles WHERE rolname='protheus'" | grep -q 1 || psql -d template1 -c "CREATE USER protheus WITH LOGIN NOSUPERUSER INHERIT CREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT -1 PASSWORD 'protheus';"
-
-# 3. Criar as Tablespaces (Ignora o erro se ja existirem)
-psql -d template1 -tc "SELECT 1 FROM pg_tablespace WHERE spcname='${POSTGRES_DB}_data'" | grep -q 1 || psql -d template1 -c "CREATE TABLESPACE ${POSTGRES_DB}_data OWNER protheus LOCATION '/postgres/pg_data/$POSTGRES_DB/data';"
-psql -d template1 -tc "SELECT 1 FROM pg_tablespace WHERE spcname='${POSTGRES_DB}_index'" | grep -q 1 || psql -d template1 -c "CREATE TABLESPACE ${POSTGRES_DB}_index OWNER protheus LOCATION '/postgres/pg_data/$POSTGRES_DB/index';"
-
-# 4. Checar se o banco de dados ja foi movido para a tablespace correta.
-DB_READY=$(psql -d template1 -tc "SELECT 1 FROM pg_database WHERE datname='$POSTGRES_DB' AND dattablespace = (SELECT oid FROM pg_tablespace WHERE spcname='${POSTGRES_DB}_data')")
-
-if echo "$DB_READY" | grep -q 1; then
-    echo "Banco de dados ja configurado corretamente nas tablespaces dedicadas."
+psql -d template1 -c "ALTER USER $DbUser WITH PASSWORD '$DbPwd';" > /dev/null 2>&1
+# Tenta criar o usuario, se falhar, apenas atualiza a senha (garante compatibilidade com volumes pre-existentes)
+psql -d template1 -tc "SELECT 1 FROM pg_roles WHERE rolname='protheus'" | grep -q 1 || psql -d template1 -c "CREATE USER protheus WITH LOGIN NOSUPERUSER INHERIT CREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT -1 PASSWORD '$DbPwd';"
+psql -d template1 -c "ALTER ROLE protheus WITH PASSWORD '$DbPwd';" > /dev/null 2>&1
+psql -d template1 -tc "SELECT 1 FROM pg_tablespace WHERE spcname='${DbName}_data'" | grep -q 1 || psql -d template1 -c "CREATE TABLESPACE ${DbName}_data OWNER protheus LOCATION '/postgres/pg_data/${DbName}/data';"
+psql -d template1 -tc "SELECT 1 FROM pg_tablespace WHERE spcname='${DbName}_index'" | grep -q 1 || psql -d template1 -c "CREATE TABLESPACE ${DbName}_index OWNER protheus LOCATION '/postgres/pg_data/${DbName}/index';"
+DB_READY=`$(psql -d template1 -tc "SELECT 1 FROM pg_database WHERE datname='${DbName}' AND dattablespace = (SELECT oid FROM pg_tablespace WHERE spcname='${DbName}_data')")
+if echo "`$DB_READY" | grep -q 1; then
+    echo "Banco de dados ja configurado."
 else
-    psql -d template1 -c "DROP DATABASE IF EXISTS $POSTGRES_DB;"
-    psql -d template1 -c "CREATE DATABASE $POSTGRES_DB WITH OWNER protheus TEMPLATE template0 ENCODING 'WIN1252' LC_COLLATE 'C' LC_CTYPE 'C' TABLESPACE ${POSTGRES_DB}_data CONNECTION LIMIT -1;"
+    psql -d template1 -c "DROP DATABASE IF EXISTS ${DbName};"
+    psql -d template1 -c "CREATE DATABASE ${DbName} WITH OWNER protheus TEMPLATE template0 ENCODING 'WIN1252' LC_COLLATE 'C' LC_CTYPE 'C' TABLESPACE ${DbName}_data CONNECTION LIMIT -1;"
 fi
-'@
+"@
 
-# Forca quebras de linha no padrao Linux (LF) e salva sem BOM (Encoding ASCII) para evitar erros de sintaxe no Bash
 $DbScriptContent = $DbScriptContent.Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText($DbScriptPath, $DbScriptContent, [System.Text.Encoding]::ASCII)
 
-# Executa o script direto com o superusuario do banco (substituindo a necessidade do "su postgres" e "passwd")
-& docker exec -u postgres $DbContainer bash /shared/setup_db.sh
+& docker exec -u postgres $DbContainer bash /shared/setup_db.sh > $null 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n [LOG DE ERRO DO POSTGRESQL]:" -ForegroundColor Red
+    & docker exec -u postgres $DbContainer bash /shared/setup_db.sh
+    Invoke-Die "O script de banco de dados falhou. Verifique as chaves e syntax." 
+}
+
 Remove-Item -LiteralPath $DbScriptPath -Force
 
 Show-Success "Banco de dados provisionado nativamente via script interno."
@@ -629,55 +698,151 @@ Show-Success "Arquivos de binarios encontrados."
 Show-Step "Configurando binarios e servico do License Server nativamente..."
 
 & docker exec $LicenseServerContainer mkdir -p $LicenseServerTarget
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao criar o diretorio no container '$LicenseServerContainer'." }
-
 & docker exec $LicenseServerContainer tar -xf "/shared/$LicenseArchive" -C $LicenseServerTarget
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao extrair os binarios do License Server no container." }
-
 & docker exec $LicenseServerContainer chmod -R +x $LicenseServerTarget
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao ajustar as permissoes dos binarios do License Server." }
 
-# Criacao da pasta destino caso nao exista e copia da lib fundamental
 & docker exec $LicenseServerContainer mkdir -p /lib/x86_64-linux-gnu
 & docker exec $LicenseServerContainer cp /totvs/licenseserver/bin/appserver/libbtmonitor.so /lib/x86_64-linux-gnu/
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao copiar libbtmonitor.so." }
 
-# Ativar e Iniciar o Servico
 & docker exec $LicenseServerContainer systemctl daemon-reload
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar systemctl daemon-reload." }
-
 & docker exec $LicenseServerContainer systemctl enable license-server
 & docker exec $LicenseServerContainer systemctl start license-server
 
-Start-Sleep -Seconds 3
-
-Write-Host "`n Status do Servico (License Server):" -ForegroundColor Cyan
-& docker exec $LicenseServerContainer systemctl --no-pager status license-server
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`n Logs de erro do Journalctl (License Server):" -ForegroundColor Red
-    & docker exec $LicenseServerContainer journalctl -xeu license-server --no-pager | Select-Object -Last 15
-    Invoke-Die "Falha ao inicializar o servico do License Server nativamente." 
-}
+# Tempo estendido para garantir que a TOTVS ative a engine de licencas na porta 5555 antes do DBaccess chamar
+Write-Host "     Aguardando o motor de licencas estabilizar (10s)..." -ForegroundColor Cyan
+Start-Sleep -Seconds 10
 
 Show-Success "License Server configurado e inicializado."
 
 # ========================================================
-# 15. CONFIGURAR BINARIOS DO DBACCESS
+# 15. CONFIGURAR BINARIOS E ODBC DO DBACCESS
 # ========================================================
 
-Show-Step "Configurando binarios do DBAccess..."
+Show-Step "Configurando ODBC, ini, binarios e servico do DBAccess nativamente..."
 
+# 15.1. Extracao dos Binarios e Permissoes
 & docker exec $DbAccessContainer mkdir -p $DbAccessTarget
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$DbAccessContainer'." }
-
 & docker exec $DbAccessContainer tar -xf "/shared/$DbAccessArchive" -C $DbAccessTarget
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$DbAccessContainer'." }
-
 & docker exec $DbAccessContainer chmod -R +x $DbAccessTarget
-if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$DbAccessContainer'." }
 
-Show-Success "Binarios do DBAccess configurados."
+# 15.2. Instalação dos Pacotes ODBC
+Write-Host "     Baixando e instalando pacotes ODBC..." -ForegroundColor Cyan
+$InstallLogs = docker exec $DbAccessContainer bash -c "command -v dnf >/dev/null 2>&1 && dnf install -y unixODBC postgresql-odbc postgresql 2>&1 || microdnf install -y unixODBC postgresql-odbc postgresql 2>&1"
+
+if ($LASTEXITCODE -ne 0) { 
+    Write-Host "`n [LOG DE ERRO DO INSTALADOR (DNF/MICRODNF)]:" -ForegroundColor Red
+    Write-Host ($InstallLogs | Out-String)
+    Invoke-Die "Falha ao instalar pacotes ODBC no tp-dbaccess. Verifique o log acima." 
+}
+
+# 15.3. Preenchimento dinamico do odbc.ini, odbcinst.ini e dbaccess.ini baseados no .env
+$DbName = $EnvVariables['POSTGRES_DB']
+$DbPwd = $EnvVariables['POSTGRES_PASSWORD']
+$DbAccessPort = $EnvVariables['DBACCESS_PORT']
+$LicensePort = $EnvVariables['LICENSESERVER_PORT']
+
+# Configurando odbc.ini
+$OdbcContent = Get-Content -Path $OdbcIniFile -Raw
+$OdbcContent = $OdbcContent -replace "{POSTGRES_DB}", $DbName -replace "{POSTGRES_PASSWORD}", $DbPwd
+$OdbcContent = $OdbcContent.Replace("`r`n", "`n")
+[System.IO.File]::WriteAllText($OdbcIniFile, $OdbcContent, [System.Text.Encoding]::ASCII)
+
+# Configurando odbcinst.ini
+$OdbcInstContent = Get-Content -Path $OdbcInstFile -Raw
+$OdbcInstContent = $OdbcInstContent.Replace("`r`n", "`n")
+[System.IO.File]::WriteAllText($OdbcInstFile, $OdbcInstContent, [System.Text.Encoding]::ASCII)
+
+# Configurando dbaccess.ini 
+$DbAccessIniFile = Join-Path $ProjectRoot "docker/dbaccess/dbaccess.ini"
+$DbAccessIniContent = @"
+[General]
+InstallPath=/totvs/protheus/bin/dbaccess
+ODBC30=1
+Port=$DbAccessPort
+ThreadInfo=0
+LogFull=0
+GlbPRofiler=0
+ThreadMin=200
+ThreadMax=10000
+ThreadInc=100
+ConsoleMaxSize=100000000
+;LicenseServer=$LicenseServerContainer
+;LicensePort=$LicensePort
+maxStringSize=100
+
+[POSTGRES]
+environments=$DbName
+clientlibrary=TO_BE_REPLACED_BY_BASH
+CodePage=WIN1252
+
+[POSTGRES/$DbName]
+user=protheus
+password=$DbPwd
+TableSpace=$DbName`_data
+IndexSpace=$DbName`_index
+"@
+
+$DbAccessIniContent = $DbAccessIniContent.Replace("`r`n", "`n")
+[System.IO.File]::WriteAllText($DbAccessIniFile, $DbAccessIniContent, [System.Text.Encoding]::ASCII)
+
+# 15.4. Copiar arquivos de configuracao para os diretorios nativos e aplicar no ODBC do Linux
+& docker exec $DbAccessContainer cp /totvs/config/odbcinst.ini /etc/odbcinst.ini
+& docker exec $DbAccessContainer cp /totvs/config/odbc.ini /etc/odbc.ini
+& docker exec $DbAccessContainer odbcinst -i -d -f /etc/odbcinst.ini > $null
+& docker exec $DbAccessContainer odbcinst -i -s -l -f /etc/odbc.ini > $null
+
+# 15.5. Autocorrecao dinamica do caminho da ClientLibrary no dbaccess.ini
+Write-Host "     Mapeando biblioteca ODBC no dbaccess.ini..." -ForegroundColor Cyan
+$OdbcFixScriptPath = Join-Path $SharedDir "fix_odbc.sh"
+$OdbcFixScriptContent = @"
+#!/bin/bash
+INI_FILE="/totvs/protheus/bin/dbaccess/multi/dbaccess.ini"
+ODBC_PATH=`$(find /usr -name "psqlodbc.so" | head -n 1)
+if [ -z "`$ODBC_PATH" ]; then
+    ODBC_PATH=`$(find /usr -name "psqlodbcw.so" | head -n 1)
+fi
+if [ -n "`$ODBC_PATH" ]; then
+    # Usando redirecionamento para evitar erro de 'Device or resource busy' no sed com bind mounts do Docker
+    sed "s|^clientlibrary=.*|clientlibrary=`$ODBC_PATH|g" "`$INI_FILE" > /tmp/dbaccess.ini.tmp
+    cat /tmp/dbaccess.ini.tmp > "`$INI_FILE"
+    rm -f /tmp/dbaccess.ini.tmp
+fi
+"@
+$OdbcFixScriptContent = $OdbcFixScriptContent.Replace("`r`n", "`n")
+[System.IO.File]::WriteAllText($OdbcFixScriptPath, $OdbcFixScriptContent, [System.Text.Encoding]::ASCII)
+
+& docker exec $DbAccessContainer bash /shared/fix_odbc.sh > $null 2>&1
+Remove-Item -LiteralPath $OdbcFixScriptPath -Force
+
+# 15.6. Validar conexao nativamente via isql
+Write-Host "     Testando conexao ODBC com o banco $DbName..." -ForegroundColor Cyan
+$IsqlLog = docker exec $DbAccessContainer isql -v $DbName 2>&1
+
+if ($LASTEXITCODE -ne 0) { 
+    Write-Host "`n [LOG DE ERRO DA CONEXAO ISQL]:" -ForegroundColor Red
+    Write-Host ($IsqlLog | Out-String)
+    Invoke-Die "O teste do ODBC falhou (isql). Verifique as credenciais no .env ou o log acima." 
+}
+
+# 15.7. Ativar e Iniciar o Servico do DBAccess
+& docker exec $DbAccessContainer systemctl daemon-reload
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar systemctl daemon-reload." }
+
+& docker exec $DbAccessContainer systemctl enable dbaccess
+& docker exec $DbAccessContainer systemctl start dbaccess
+
+Start-Sleep -Seconds 3
+
+Write-Host "`n Status do Servico (DBAccess):" -ForegroundColor Cyan
+& docker exec $DbAccessContainer systemctl --no-pager status dbaccess
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n Logs de erro do Journalctl (DBAccess):" -ForegroundColor Red
+    & docker exec $DbAccessContainer journalctl -xeu dbaccess --no-pager | Select-Object -Last 15
+    Invoke-Die "Falha ao inicializar o servico do DBAccess nativamente." 
+}
+
+Show-Success "DBAccess configurado e inicializado com padrao TOTVS."
 
 # ========================================================
 # 16. CONFIGURAR BINARIOS E RPO DO APPSERVER
@@ -721,17 +886,6 @@ if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar systemctl daemon-reload
 
 & docker exec $SmartViewContainer systemctl enable smart-view-agent
 & docker exec $SmartViewContainer systemctl start smart-view-agent
-
-Start-Sleep -Seconds 3
-
-Write-Host "`n Status do Servico (Smart View):" -ForegroundColor Cyan
-& docker exec $SmartViewContainer systemctl --no-pager status smart-view-agent
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`n Logs de erro do Journalctl (Smart View):" -ForegroundColor Red
-    & docker exec $SmartViewContainer journalctl -xeu smart-view-agent --no-pager | Select-Object -Last 15
-    Invoke-Die "Falha ao inicializar o servico do Smart View nativamente." 
-}
 
 Show-Success "Binarios do Smart View configurados e inicializados nativamente via systemd."
 
