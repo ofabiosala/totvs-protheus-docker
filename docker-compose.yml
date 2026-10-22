@@ -62,6 +62,23 @@ services:
     networks:
       - totvs-net
 
+  tp-smartview:
+    image: oraclelinux:10
+    container_name: tp-smartview
+    restart: unless-stopped
+    privileged: true
+    command: /sbin/init
+    depends_on:
+      - tp-db
+    ports:
+      - "7019:7019"
+    volumes:
+      - ./docker/smartview:/usr/sbin/smart-view
+      - ./config/smart-view-agent.service:/etc/systemd/system/smart-view-agent.service
+      - ./shared:/shared
+    networks:
+      - totvs-net
+
   tp-dashboard:
     image: node:20-alpine
     container_name: tp-dashboard

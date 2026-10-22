@@ -7,11 +7,13 @@ const url = require('url');
 const PORT = 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
+// Adicionado o 'tp-smartview' na lista de monitoramento
 const TARGET_CONTAINERS = [
     'tp-db',
     'tp-licenseserver',
     'tp-dbaccess',
-    'tp-appserver'
+    'tp-appserver',
+    'tp-smartview'
 ];
 
 function executeCommand(command) {

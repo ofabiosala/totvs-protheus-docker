@@ -1,4 +1,3 @@
-
 [CmdletBinding()]
 param()
 
@@ -19,6 +18,31 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
 }
 
 Set-Location -LiteralPath $ProjectRoot
+
+$SharedDir = Join-Path $ProjectRoot "shared"
+$ConfigFile = Join-Path $ProjectRoot "config/download.json"
+$EnvFile = Join-Path $ProjectRoot ".env"
+$EnvExampleFile = Join-Path $ProjectRoot ".env.example"
+
+# Containers
+$LicenseServerContainer = "tp-licenseserver"
+$DbAccessContainer = "tp-dbaccess"
+$AppServerContainer = "tp-appserver"
+$SmartViewContainer = "tp-smartview"
+
+# Arquivos
+$LicenseArchive = "LICENSE.TAR"
+$DbAccessArchive = "DBACCESS.TAR"
+$AppServerArchive = "APPSERVER.TAR"
+$RpoArchive = "REPOSITORIO.RPO"
+$SmartViewArchive = "SMART_VIEW.zip"
+
+# Diretórios Alvo Internos
+$LicenseServerTarget = "/totvs/licenseserver"
+$DbAccessTarget = "/totvs/protheus/bin/dbaccess"
+$AppServerTarget = "/totvs/protheus/bin/appserver"
+$ApoTarget = "/totvs/protheus/bin/apo"
+$SmartViewTarget = "/usr/sbin/smart-view"
 
 # ========================================================
 # INTERFACE
@@ -44,6 +68,17 @@ function Show-Success {
 function Show-Fail {
     param([string]$Message)
     Write-Host " [ERRO] $Message" -ForegroundColor Red
+}
+
+function Show-Warning {
+    param([string]$Message)
+    Write-Host " [!] $Message" -ForegroundColor DarkYellow
+}
+
+function Invoke-Die {
+    param([string]$Message)
+    Show-Fail $Message
+    exit 1
 }
 
 # ========================================================
@@ -150,56 +185,55 @@ function Download-FileWithBar {
 Clear-Host
 Show-Header "TOTVS PROTHEUS - AMBIENTE DOCKER"
 
-# 1. VALIDAR CONFIGURACAO DE DOWNLOAD
+# ========================================================
+# 1. VALIDAR AMBIENTE E CONFIGURACAO
+# ========================================================
 
 Show-Step "Validando arquivo de configuracao..."
 
-$configFile = Join-Path $ProjectRoot "config/download.json"
-
-if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) {
-    Show-Fail "Arquivo de configuracao '$configFile' nao encontrado."
-    exit 1
+if (-not (Test-Path -LiteralPath $ConfigFile -PathType Leaf)) {
+    Invoke-Die "Arquivo de configuracao '$ConfigFile' nao encontrado."
 }
 
 try {
-    $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json -ErrorAction Stop
+    $config = Get-Content -LiteralPath $ConfigFile -Raw | ConvertFrom-Json -ErrorAction Stop
 }
 catch {
-    Show-Fail "Nao foi possivel ler o JSON: $($_.Exception.Message)"
-    exit 1
+    Invoke-Die "Nao foi possivel ler o JSON: $($_.Exception.Message)"
 }
 
 $downloadUrl = [string]$config.url
 $expectedHash = ([string]$config.sha256).Trim()
 
-if ([string]::IsNullOrWhiteSpace($downloadUrl) -or [string]::IsNullOrWhiteSpace($expectedHash)) {
-    Show-Fail "O arquivo config/download.json deve conter os campos 'url' e 'sha256'."
-    exit 1
+if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
+    Invoke-Die "O campo 'url' esta ausente em config/download.json."
 }
 
 if ($downloadUrl -notmatch '^https?://') {
-    Show-Fail "A URL de download deve comecar com http:// ou https://."
-    exit 1
+    Invoke-Die "A URL de download deve comecar com http:// ou https://."
 }
 
 if ($expectedHash -notmatch '^[a-fA-F0-9]{64}$') {
-    Show-Fail "O campo sha256 deve conter exatamente 64 caracteres hexadecimais."
-    exit 1
+    Invoke-Die "O campo 'sha256' deve conter exatamente 64 caracteres hexadecimais."
 }
 
 Show-Success "Arquivo de configuracao validado."
 
+# ========================================================
 # 2. CRIAR DIRETORIO COMPARTILHADO
+# ========================================================
 
-$sharedDir = Join-Path $ProjectRoot "shared"
+Show-Step "Preparando diretorio compartilhado..."
 
-if (-not (Test-Path -LiteralPath $sharedDir -PathType Container)) {
-    New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null
+if (-not (Test-Path -LiteralPath $SharedDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $SharedDir -Force | Out-Null
 }
 
-$tarFile = Join-Path $sharedDir "full.tar"
+$tarFile = Join-Path $SharedDir "full.tar"
 
+# ========================================================
 # 3. BAIXAR DEPENDENCIAS
+# ========================================================
 
 Show-Step "Baixando dependencias..."
 
@@ -208,12 +242,13 @@ try {
     Show-Success "Download concluido."
 }
 catch {
-    Show-Fail "Falha no download: $($_.Exception.Message)"
     Remove-Item -LiteralPath $tarFile -Force -ErrorAction SilentlyContinue
-    exit 1
+    Invoke-Die "Falha no download: $($_.Exception.Message)"
 }
 
+# ========================================================
 # 4. VALIDAR HASH SHA-256
+# ========================================================
 
 Show-Step "Validando hash SHA-256..."
 
@@ -221,31 +256,30 @@ try {
     $actualHash = (Get-FileHash -LiteralPath $tarFile -Algorithm SHA256).Hash
 }
 catch {
-    Show-Fail "Nao foi possivel calcular o hash: $($_.Exception.Message)"
-    exit 1
+    Invoke-Die "Nao foi possivel calcular o hash: $($_.Exception.Message)"
 }
 
 if ($actualHash -ine $expectedHash) {
-    Show-Fail "O hash do arquivo nao confere!"
     Write-Host "     Esperado: $expectedHash" -ForegroundColor Red
     Write-Host "     Recebido: $actualHash" -ForegroundColor Red
     Remove-Item -LiteralPath $tarFile -Force -ErrorAction SilentlyContinue
-    exit 1
+    Invoke-Die "O hash do arquivo nao confere!"
 }
 
 Show-Success "Hash SHA-256 validado com sucesso."
 
+# ========================================================
 # 5. EXTRAIR ARQUIVO TAR
+# ========================================================
 
-Show-Step "Extraindo dependencias em '$sharedDir'..."
+Show-Step "Extraindo dependencias em '$SharedDir'..."
 
 if (-not (Test-CommandExists "tar")) {
-    Show-Fail "O comando tar nao foi encontrado no PATH."
-    exit 1
+    Invoke-Die "O comando tar nao foi encontrado no PATH."
 }
 
 try {
-    & tar -xf $tarFile -C $sharedDir
+    & tar -xf $tarFile -C $SharedDir
 
     if ($LASTEXITCODE -ne 0) {
         throw "O comando tar terminou com codigo $LASTEXITCODE."
@@ -255,19 +289,22 @@ try {
     Show-Success "Dependencias extraidas e arquivo temporario removido."
 }
 catch {
-    Show-Fail "Falha na extracao: $($_.Exception.Message)"
-    exit 1
+    Invoke-Die "Falha na extracao: $($_.Exception.Message)"
 }
 
+# ========================================================
 # 6. CRIAR ESTRUTURA DE DIRETORIOS E ARQUIVOS
+# ========================================================
 
 Show-Step "Criando estrutura de diretorios e arquivos..."
 
 $directories = @(
+    "config",
+    "docker/licenseserver",
+    "docker/dbaccess",
     "docker/appserver",
     "docker/appserver/apo",
-    "docker/dbaccess",
-    "docker/licenseserver",
+    "docker/smartview",
     "protheus_data/system",
     "protheus_data/data",
     "db/init",
@@ -276,7 +313,6 @@ $directories = @(
 
 foreach ($dir in $directories) {
     $directoryPath = Join-Path $ProjectRoot $dir
-
     if (-not (Test-Path -LiteralPath $directoryPath -PathType Container)) {
         New-Item -ItemType Directory -Path $directoryPath -Force | Out-Null
     }
@@ -290,100 +326,137 @@ $files = @(
 
 foreach ($file in $files) {
     $filePath = Join-Path $ProjectRoot $file
-
     if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
         New-Item -ItemType File -Path $filePath -Force | Out-Null
     }
 }
 
+# Criacao do arquivo de servico do Smart View localmente (SOBRESCREVE O ANTIGO COM -Force)
+$SmartViewServiceFile = Join-Path $ProjectRoot "config/smart-view-agent.service"
+@"
+[Unit]
+Description=smart-view-agent
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/sbin/smart-view
+ExecStart=/usr/sbin/smart-view/TReports.Agent --urls http://*:7019
+
+[Install]
+WantedBy=multi-user.target
+"@ | Set-Content -LiteralPath $SmartViewServiceFile -Encoding UTF8 -Force
+
+# Criacao do .dockerignore
 $dockerIgnoreFile = Join-Path $ProjectRoot ".dockerignore"
-
 if (-not (Test-Path -LiteralPath $dockerIgnoreFile -PathType Leaf)) {
-    @("shared/", "*.tar", ".git/", ".env") |
-    Set-Content -LiteralPath $dockerIgnoreFile -Encoding UTF8
+    @"
+shared/
+*.tar
+*.zip
+.git/
+.env
+"@ | Set-Content -LiteralPath $dockerIgnoreFile -Encoding UTF8
 }
 
-Show-Success "Estrutura de pastas e arquivos pronta."
+# Criacao do .gitignore
+$gitIgnoreFile = Join-Path $ProjectRoot ".gitignore"
+if (-not (Test-Path -LiteralPath $gitIgnoreFile -PathType Leaf)) {
+    @"
+# Ignorar arquivos de ambiente locais
+.env
 
+# Ignorar banco de dados local
+/db/data/
+/db/backups/
+
+# Ignorar os binarios e zips baixados
+/shared/
+*.tar
+*.zip
+
+# Ignorar binarios extraidos localmente, preservando configuracoes
+/docker/licenseserver/*
+!/docker/licenseserver/*.ini
+
+/docker/dbaccess/*
+!/docker/dbaccess/*.ini
+
+/docker/appserver/*
+!/docker/appserver/*.ini
+!/docker/appserver/apo/
+/docker/appserver/apo/*
+!/docker/appserver/apo/*.rpo
+
+/docker/smartview/*
+!/docker/smartview/*.ini
+"@ | Set-Content -LiteralPath $gitIgnoreFile -Encoding UTF8
+}
+
+Show-Success "Estrutura de diretorios, servicos e gitignore pronta."
+
+# ========================================================
 # 7. CRIAR ARQUIVOS DE AMBIENTE
+# ========================================================
 
-$envDefault = @(
-    "POSTGRES_DB=protheus",
-    "POSTGRES_USER=postgres",
-    "POSTGRES_PASSWORD=protheus_pwd",
-    "POSTGRES_PORT=5432",
-    "APPSERVER_PORT=1234",
-    "DBACCESS_PORT=7890",
-    "LICENSESERVER_PORT=5555",
-    "SHARED_DIR=./shared"
-)
+Show-Step "Verificando arquivos de ambiente..."
 
-$envExampleFile = Join-Path $ProjectRoot ".env.example"
+function New-EnvFile {
+    param([string]$Destination)
 
-if (-not (Test-Path -LiteralPath $envExampleFile -PathType Leaf)) {
-    $envDefault | Set-Content -LiteralPath $envExampleFile -Encoding UTF8
-    Show-Success "Arquivo .env.example criado."
+    if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+        @"
+POSTGRES_DB=protheus
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=protheus_pwd
+POSTGRES_PORT=5432
+APPSERVER_PORT=1234
+DBACCESS_PORT=7890
+LICENSESERVER_PORT=5555
+SHARED_DIR=./shared
+"@ | Set-Content -LiteralPath $Destination -Encoding UTF8
+        Show-Success "Arquivo criado: $Destination"
+    }
+    else {
+        Show-Success "Arquivo existente preservado: $Destination"
+    }
 }
 
-$envFile = Join-Path $ProjectRoot ".env"
+New-EnvFile $EnvExampleFile
+New-EnvFile $EnvFile
 
-if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
-    Show-Step "Criando arquivo .env padrao..."
-    $envDefault | Set-Content -LiteralPath $envFile -Encoding UTF8
-    Show-Success "Arquivo .env criado."
-}
-else {
-    Show-Success "Arquivo .env existente preservado."
-}
-
+# ========================================================
 # 8. VALIDAR DOCKER E DOCKER COMPOSE
+# ========================================================
 
 Show-Step "Verificando Docker..."
 
 if (-not (Test-CommandExists "docker")) {
-    Show-Fail "Docker nao foi encontrado no PATH. Instale ou inicie o Docker Desktop."
-    exit 1
+    Invoke-Die "Docker nao esta acessivel. Inicie o Docker Engine ou Docker Desktop."
 }
 
 try {
     & docker info | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Docker nao esta acessivel. Verifique se o Docker Desktop esta iniciado."
-    }
-
-    & docker compose version | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "O plugin Docker Compose nao esta disponivel."
-    }
+    if ($LASTEXITCODE -ne 0) { throw "Falha" }
 }
 catch {
-    Show-Fail $_.Exception.Message
-    exit 1
+    Invoke-Die "Docker nao esta acessivel. Inicie o Docker Engine ou Docker Desktop."
+}
+
+try {
+    & docker compose version | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Falha" }
+}
+catch {
+    Invoke-Die "O plugin Docker Compose nao esta disponivel."
 }
 
 Show-Success "Docker e Docker Compose estao disponiveis."
 
-# 9. BAIXAR IMAGENS DOCKER
+# ========================================================
+# 9. LOCALIZAR ARQUIVO DOCKER COMPOSE
+# ========================================================
 
-Show-Step "Atualizando imagens Docker (PostgreSQL e Oracle Linux)..."
-
-& docker pull postgres:16
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao baixar a imagem postgres:16."
-    exit 1
-}
-
-& docker pull oraclelinux:10
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao baixar a imagem oraclelinux:10."
-    exit 1
-}
-
-Show-Success "Imagens atualizadas."
-
-# 10. VALIDAR CONFIGURACAO DO COMPOSE
-
-Show-Step "Validando configuracao Docker Compose..."
+Show-Step "Localizando configuracao Docker Compose..."
 
 $composeCandidates = @(
     "docker-compose.yml",
@@ -404,167 +477,215 @@ foreach ($candidate in $composeCandidates) {
 }
 
 if ($null -eq $composeFile) {
-    Show-Fail "Arquivo Docker Compose nao encontrado na raiz do projeto."
-    exit 1
+    Invoke-Die "Nenhum arquivo Docker Compose foi encontrado na raiz do projeto."
 }
 
 & docker compose -f $composeFile config --quiet
 
 if ($LASTEXITCODE -ne 0) {
-    Show-Fail "A configuracao Docker Compose possui erros. Verifique os arquivos YAML e o .env."
-    exit 1
+    Invoke-Die "A configuracao Docker Compose possui erros. Verifique o YAML e o .env."
 }
 
 Show-Success "Configuracao Docker Compose validada."
 
+# ========================================================
+# 10. BAIXAR IMAGENS DOCKER
+# ========================================================
+
+Show-Step "Atualizando imagens Docker..."
+
+& docker pull postgres:16
+if ($LASTEXITCODE -ne 0) {
+    Invoke-Die "Falha ao baixar a imagem postgres:16."
+}
+
+& docker pull oraclelinux:10
+if ($LASTEXITCODE -ne 0) {
+    Invoke-Die "Falha ao baixar a imagem oraclelinux:10."
+}
+
+Show-Success "Imagens atualizadas."
+
+# ========================================================
 # 11. INICIALIZAR CONTAINERS
+# ========================================================
 
 Show-Step "Inicializando containers via Docker Compose..."
 
 & docker compose -f $composeFile up -d
 
 if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao inicializar os containers."
-    Write-Host "Execute 'docker compose logs' para consultar os erros." -ForegroundColor Yellow
-    exit 1
+    & docker compose -f $composeFile logs --tail=100
+    Invoke-Die "Falha ao inicializar os containers."
 }
 
 Show-Success "Ambiente inicializado."
 
-# 12. CONFIGURAR BINARIOS NO TP-DBACCESS
+# ========================================================
+# 12. VALIDAR ARQUIVOS DE BINARIOS
+# ========================================================
+
+Show-Step "Validando integridade dos arquivos extraídos..."
+
+$RequiredArchives = @(
+    (Join-Path $SharedDir $LicenseArchive),
+    (Join-Path $SharedDir $DbAccessArchive),
+    (Join-Path $SharedDir $AppServerArchive),
+    (Join-Path $SharedDir $RpoArchive),
+    (Join-Path $SharedDir $SmartViewArchive)
+)
+
+foreach ($archive in $RequiredArchives) {
+    if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+        Invoke-Die "Arquivo necessario nao encontrado: $archive"
+    }
+}
+
+Show-Success "Arquivos de binarios encontrados."
+
+# ========================================================
+# 13. CONFIGURAR BINARIOS DO LICENSE SERVER
+# ========================================================
+
+Show-Step "Configurando binarios do License Server..."
+
+& docker exec $LicenseServerContainer mkdir -p $LicenseServerTarget
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao criar o diretorio no container '$LicenseServerContainer'." }
+
+& docker exec $LicenseServerContainer tar -xf "/shared/$LicenseArchive" -C $LicenseServerTarget
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao extrair os binarios do License Server no container." }
+
+& docker exec $LicenseServerContainer chmod -R +x $LicenseServerTarget
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao ajustar as permissoes dos binarios do License Server." }
+
+Show-Success "Binarios do License Server configurados."
+
+# ========================================================
+# 14. CONFIGURAR BINARIOS DO DBACCESS
+# ========================================================
 
 Show-Step "Configurando binarios do DBAccess..."
 
-$dbaccessContainer = "tp-dbaccess"
-$dbaccessArchive = "DBACCESS.TAR"
-$dbaccessArchivePath = Join-Path $sharedDir $dbaccessArchive
+& docker exec $DbAccessContainer mkdir -p $DbAccessTarget
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$DbAccessContainer'." }
 
-if (-not (Test-Path -LiteralPath $dbaccessArchivePath -PathType Leaf)) {
-    Show-Fail "Arquivo DBAccess nao encontrado em '$dbaccessArchivePath'."
-    exit 1
-}
+& docker exec $DbAccessContainer tar -xf "/shared/$DbAccessArchive" -C $DbAccessTarget
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$DbAccessContainer'." }
 
-& docker exec $dbaccessContainer mkdir -p /totvs/protheus/bin/dbaccess
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao criar o diretorio de binarios no container tp-dbaccess."
-    exit 1
-}
-
-& docker exec $dbaccessContainer tar -xf "/shared/$dbaccessArchive" -C /totvs/protheus/bin/dbaccess
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao extrair os binarios do DBAccess no container."
-    exit 1
-}
-
-& docker exec $dbaccessContainer chmod -R +x /totvs/protheus/bin/dbaccess
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao ajustar as permissoes dos binarios do DBAccess."
-    exit 1
-}
+& docker exec $DbAccessContainer chmod -R +x $DbAccessTarget
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$DbAccessContainer'." }
 
 Show-Success "Binarios do DBAccess configurados."
 
-# 13. CONFIGURAR BINARIOS E RPO NO TP-APPSERVER
+# ========================================================
+# 15. CONFIGURAR BINARIOS E RPO DO APPSERVER
+# ========================================================
 
 Show-Step "Configurando binarios e RPO do AppServer..."
 
-$appserverContainer = "tp-appserver"
-$appserverArchive = "APPSERVER.TAR"
-$rpoArchive = "REPOSITORIO.RPO"
+& docker exec $AppServerContainer mkdir -p $AppServerTarget $ApoTarget
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
 
-$appserverArchivePath = Join-Path $sharedDir $appserverArchive
-$rpoArchivePath = Join-Path $sharedDir $rpoArchive
+& docker exec $AppServerContainer tar -xf "/shared/$AppServerArchive" -C $AppServerTarget
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
 
-if (-not (Test-Path -LiteralPath $appserverArchivePath -PathType Leaf)) {
-    Show-Fail "Arquivo AppServer nao encontrado em '$appserverArchivePath'."
-    exit 1
-}
+& docker exec $AppServerContainer cp "/shared/$RpoArchive" "$ApoTarget/tttm120.rpo"
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
 
-if (-not (Test-Path -LiteralPath $rpoArchivePath -PathType Leaf)) {
-    Show-Fail "Arquivo RPO nao encontrado em '$rpoArchivePath'."
-    exit 1
-}
+& docker exec $AppServerContainer touch "$ApoTarget/custom.rpo"
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
 
-& docker exec $appserverContainer mkdir -p /totvs/protheus/bin/appserver /totvs/protheus/bin/apo
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao criar os diretorios no container tp-appserver."
-    exit 1
-}
-
-& docker exec $appserverContainer tar -xf "/shared/$appserverArchive" -C /totvs/protheus/bin/appserver
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao extrair os binarios do AppServer no container."
-    exit 1
-}
-
-& docker exec $appserverContainer cp "/shared/$rpoArchive" /totvs/protheus/bin/apo/tttm120.rpo
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao disponibilizar o arquivo RPO padrao."
-    exit 1
-}
-
-& docker exec $appserverContainer touch /totvs/protheus/bin/apo/custom.rpo
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao criar o arquivo custom.rpo."
-    exit 1
-}
-
-& docker exec $appserverContainer chmod -R +x /totvs/protheus/bin/appserver
-if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Falha ao ajustar as permissoes dos binarios do AppServer."
-    exit 1
-}
+& docker exec $AppServerContainer chmod -R +x $AppServerTarget
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$AppServerContainer'." }
 
 Show-Success "Binarios e RPOs do AppServer configurados."
 
-# 14. STATUS DOS CONTAINERS
+# ========================================================
+# 16. CONFIGURAR E INICIAR BINARIOS DO SMART VIEW (MODO RAIZ)
+# ========================================================
+
+Show-Step "Configurando binarios e servico do Smart View nativamente..."
+
+# 16.1. Garantir que ferramentas e bibliotecas necessarias (.NET/ICU) existam na imagem base
+& docker exec $SmartViewContainer bash -c "dnf install -y unzip libicu krb5-libs zlib openssl-libs >/dev/null 2>&1"
+
+# 16.2. Extrair binarios em /usr/sbin/smart-view
+& docker exec $SmartViewContainer mkdir -p $SmartViewTarget
+& docker exec $SmartViewContainer bash -c "unzip -qo /shared/$SmartViewArchive -d $SmartViewTarget"
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao extrair os binarios do Smart View no container." }
+
+# Garante permissao de execucao no binario real
+& docker exec $SmartViewContainer bash -c "chmod +x $SmartViewTarget/TReports.Agent"
+
+# 16.3. Ativar e Iniciar o Servico (O arquivo ja esta mapeado pelo Compose)
+& docker exec $SmartViewContainer systemctl daemon-reload
+if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar systemctl daemon-reload." }
+
+& docker exec $SmartViewContainer systemctl enable smart-view-agent
+& docker exec $SmartViewContainer systemctl start smart-view-agent
+
+# Aguarda 3 segundos para garantir que o processo nao caiu instantaneamente
+Start-Sleep -Seconds 3
+
+Write-Host "`n Status do Servico no SO Interno:" -ForegroundColor Cyan
+& docker exec $SmartViewContainer systemctl --no-pager status smart-view-agent
+
+# Se o comando status falhar, exibe o log de erro real
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n Logs de erro do Journalctl:" -ForegroundColor Red
+    & docker exec $SmartViewContainer journalctl -xeu smart-view-agent --no-pager | Select-Object -Last 15
+    Invoke-Die "Falha ao inicializar o servico do Smart View nativamente." 
+}
+
+Show-Success "Binarios do Smart View configurados e inicializados nativamente via systemd."
+
+# ========================================================
+# 17. STATUS DOS CONTAINERS
+# ========================================================
 
 Show-Header "STATUS DOS CONTAINERS"
 
 & docker compose -f $composeFile ps
 
 if ($LASTEXITCODE -ne 0) {
-    Show-Fail "Nao foi possivel consultar o status dos containers."
-    exit 1
+    Invoke-Die "Nao foi possivel consultar o status dos containers."
 }
 
-Show-Header "PROCESSO CONCLUIDO"
-Show-Success "Script executado sem erros."
-
 # ========================================================
-# 15. INICIALIZAR DASHBOARD WEB
+# 18. INICIALIZAR DASHBOARD WEB
 # ========================================================
 
 Show-Header "INICIALIZANDO DASHBOARD DE GERENCIAMENTO"
 
-if (Test-CommandExists "node") {
-    $dashboardScript = Join-Path $ProjectRoot "dashboard/server.js"
+$DashboardUrl = "http://localhost:3000"
+Show-Step "Aguardando resposta do Dashboard Web..."
 
-    if (Test-Path -LiteralPath $dashboardScript -PathType Leaf) {
-        Show-Step "Iniciando servidor do painel Web..."
+$Ready = $false
 
-        # Encerra qualquer instância anterior rodando o server.js para evitar conflito na porta 3000
-        Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | 
-        Where-Object { $_.CommandLine -like "*dashboard/server.js*" } | 
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-
-        # Inicia o Node.js em segundo plano
-        Start-Process -FilePath "node" `
-            -ArgumentList "`"$dashboardScript`"" `
-            -WorkingDirectory (Join-Path $ProjectRoot "dashboard") `
-            -WindowStyle Hidden
-
+# Aguarda ate 15 segundos para o container subir e responder
+for ($i = 1; $i -le 15; $i++) {
+    try {
+        $null = Invoke-WebRequest -Uri $DashboardUrl -UseBasicParsing -ErrorAction Stop
+        $Ready = $true
+        break
+    }
+    catch {
         Start-Sleep -Seconds 1
-
-        Show-Success "Dashboard iniciado em http://localhost:3000"
-
-        # Abre o navegador automaticamente
-        Start-Process "http://localhost:3000"
     }
-    else {
-        Show-Fail "Arquivo '$dashboardScript' nao encontrado."
-    }
+}
+
+if ($Ready) {
+    Show-Success "Dashboard disponível em $DashboardUrl"
+    Start-Process $DashboardUrl
 }
 else {
-    Write-Host " [!] Node.js nao encontrado no PATH. O dashboard nao foi iniciado automaticamente." -ForegroundColor DarkYellow
+    Show-Warning "O dashboard nao respondeu a tempo em $DashboardUrl."
+    Show-Warning "Verifique os logs do container com: docker compose logs tp-dashboard"
 }
+
+# ========================================================
+# CONCLUSAO
+# ========================================================
+
+Show-Header "PROCESSO CONCLUIDO"
+Show-Success "Script finalizado."
