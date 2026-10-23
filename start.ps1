@@ -309,7 +309,7 @@ $directories = @(
     "docker/smartview",
     "protheus_data",
     "protheus_data/system",
-    "protheus_data/data",
+    "protheus_data/systemload",
     "db/init",
     "db/backups"
 )
@@ -721,6 +721,103 @@ Show-Step "Configurando binarios e servico do License Server nativamente..."
 & docker exec $LicenseServerContainer mkdir -p /lib/x86_64-linux-gnu
 & docker exec $LicenseServerContainer cp /totvs/licenseserver/bin/appserver/libbtmonitor.so /lib/x86_64-linux-gnu/
 
+# Preenchimento dinamico do appserver.ini do License Server baseado no novo template
+$LicensePort = $EnvVariables['LICENSESERVER_PORT']
+
+$LicenseServerIniFile = Join-Path $ProjectRoot "docker/licenseserver/appserver.ini"
+$LicenseServerIniContent = @"
+[ENVIRONMENT]
+SourcePath=/totvs/licenseserver/data/apo
+RootPath=/totvs/licenseserver/data/
+StartPath=/system/
+RpoDb=SQLite
+RpoLanguage=PORTUGUESE
+RpoVersion=120
+LocalFiles=SQLite
+DBDataBase=SQLite
+DBAlias=SYSTEM
+DBServer=localhost
+startSysInDB=1
+TOPMemoMega=1
+FWLOGMSG_DEBUG=0
+FWFRAME_TRACELOG=0
+RPOCustom=/totvs/licenseserver/bin/appserver/custom.rpo
+
+[DRIVERS]
+Active=TCP
+MultiProtocolPortSecure=0
+MultiProtocolPort=0
+
+[TCP]
+TYPE=TCPIP
+Port=2234
+
+[LICENSESERVER]
+Enable=1
+Port=$LicensePort
+ShowStatus=0
+EnableNumber=1
+LicenseFile=lsinitialize.inf
+IPCGOTIMEOUT=45000
+IPCRETURNTIMEOUT=90000
+NUMBERVAL=1
+AUTOSAVENUMBER=1
+STATELESSREUSECONN=60
+
+[LICENSECLIENT]
+Server=LOCALHOST
+Port=$LicensePort
+Enable=1
+
+[GENERAL]
+BUILDKILLUSERS=1
+CONSOLELOG=1
+CONSOLE=1
+DebugThreadUsedmemory=0
+ThreadMemwarning=0
+MaxStringSize=500
+IPC_ActiveTimeOut=300
+ASyncConsoleLog=0
+CanAcceptDebugger=0
+CanAcceptRPC=0
+SQLITE_IntegrityCheck=1
+SQLITE_CheckImproperShutdown=2
+SQLITE_DBSysRecovery=1
+
+[ONSTART]
+jobs=LSInit
+refreshRate=60
+
+[LSInit]
+Main=LSInitialize
+Environment=Environment
+
+[SSLConfigure]
+SSL2=0
+SSL3=1
+TLS1_0=1
+TLS1_1=1
+TLS1_2=1
+BUGS=0
+SecondCertificateClient=/totvs/licenseserver/data/certs/licenseservercloud.cer
+Verbose=0
+
+[WEBAPP]
+Port=8020
+HideParamsForm=1
+LastMainProg=TOTVSLSMONITOR
+EnvServer=Environment
+
+[WEBMONITOR]
+ENABLE=0
+
+[APP_MONITOR]
+ENABLE=0
+"@
+
+$LicenseServerIniContent = $LicenseServerIniContent.Replace("`r`n", "`n")
+[System.IO.File]::WriteAllText($LicenseServerIniFile, $LicenseServerIniContent, [System.Text.Encoding]::ASCII)
+
 & docker exec $LicenseServerContainer systemctl daemon-reload
 & docker exec $LicenseServerContainer systemctl enable license-server
 & docker exec $LicenseServerContainer systemctl start license-server
@@ -729,7 +826,7 @@ Show-Step "Configurando binarios e servico do License Server nativamente..."
 Write-Host "     Aguardando o motor de licencas estabilizar (10s)..." -ForegroundColor Cyan
 Start-Sleep -Seconds 10
 
-Show-Success "License Server configurado e inicializado."
+Show-Success "License Server configurado e inicializado com template atualizado."
 
 # ========================================================
 # 15. CONFIGURAR BINARIOS E ODBC DO DBACCESS
@@ -752,11 +849,10 @@ if ($LASTEXITCODE -ne 0) {
     Invoke-Die "Falha ao instalar pacotes ODBC no tp-dbaccess. Verifique o log acima." 
 }
 
-# 15.3. Preenchimento dinamico do odbc.ini, odbcinst.ini e dbaccess.ini baseados no .env
+# 15.3. Preenchimento dinamico do odbc.ini, odbcinst.ini e dbaccess.ini baseados no .env e novo template
 $DbName = $EnvVariables['POSTGRES_DB']
 $DbPwd = $EnvVariables['POSTGRES_PASSWORD']
 $DbAccessPort = $EnvVariables['DBACCESS_PORT']
-$LicensePort = $EnvVariables['LICENSESERVER_PORT']
 
 # Configurando odbc.ini
 $OdbcContent = Get-Content -Path $OdbcIniFile -Raw
@@ -769,7 +865,7 @@ $OdbcInstContent = Get-Content -Path $OdbcInstFile -Raw
 $OdbcInstContent = $OdbcInstContent.Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText($OdbcInstFile, $OdbcInstContent, [System.Text.Encoding]::ASCII)
 
-# Configurando dbaccess.ini 
+# Configurando dbaccess.ini baseado no novo template (sem apontamento de licenca para rodar offline ou por topconnect)
 $DbAccessIniFile = Join-Path $ProjectRoot "docker/dbaccess/dbaccess.ini"
 $DbAccessIniContent = @"
 [General]
@@ -783,9 +879,9 @@ ThreadMin=200
 ThreadMax=10000
 ThreadInc=100
 ConsoleMaxSize=100000000
-;LicenseServer=$LicenseServerContainer
-;LicensePort=$LicensePort
 maxStringSize=100
+LicenseServer=
+LicensePort=0
 
 [POSTGRES]
 environments=$DbName
@@ -797,6 +893,7 @@ user=protheus
 password=$DbPwd
 TableSpace=$DbName`_data
 IndexSpace=$DbName`_index
+Disable=0
 "@
 
 $DbAccessIniContent = $DbAccessIniContent.Replace("`r`n", "`n")
@@ -859,7 +956,7 @@ if ($LASTEXITCODE -ne 0) {
     Invoke-Die "Falha ao inicializar o servico do DBAccess nativamente." 
 }
 
-Show-Success "DBAccess configurado e inicializado com padrao TOTVS."
+Show-Success "DBAccess configurado e inicializado com novo template."
 
 # ========================================================
 # 16. CONFIGURAR BINARIOS E RPO DO APPSERVER
@@ -873,17 +970,38 @@ if ($LASTEXITCODE -ne 0) { Invoke-Die "Falha ao executar comando no container '$
 
 & docker exec $AppServerContainer tar -xf "/shared/$AppServerArchive" -C $AppServerTarget
 & docker exec $AppServerContainer cp "/shared/$RpoArchive" "$ApoTarget/tttm120.rpo"
-& docker exec $AppServerContainer touch "$ApoTarget/tttm120_custom.rpo"
+& docker exec $AppServerContainer touch "$ApoTarget/custom.rpo"
 & docker exec $AppServerContainer chmod -R +x $AppServerTarget
 
-# 16.2. Preenchimento dinamico do appserver.ini baseado no .env e ambiente
+Write-Host "     Instalando unzip e extraindo pacotes complementares..." -ForegroundColor Cyan
+& docker exec $AppServerContainer bash -c "command -v unzip >/dev/null 2>&1 || dnf install -y unzip >/dev/null 2>&1 || microdnf install -y unzip >/dev/null 2>&1"
+
+# Separação dos pacotes ZIP
+$zipsToExtract = @{
+    "HELPS.ZIP"       = "/totvs/protheus_data/systemload"
+    "DICIONARIOS.ZIP" = "/totvs/protheus_data/systemload"
+    "MENUS.ZIP"       = "/totvs/protheus_data/system"
+}
+
+foreach ($zip in $zipsToExtract.GetEnumerator()) {
+    $zipFile = $zip.Name
+    $targetDir = $zip.Value
+    & docker exec $AppServerContainer bash -c "if [ -f /shared/$zipFile ]; then unzip -o /shared/$zipFile -d $targetDir > /dev/null; fi"
+}
+
+# Tratamento isolado para o pacote WEBAPP (Verifica se está em .TAR ou .ZIP e utiliza a ferramenta correspondente)
+& docker exec $AppServerContainer bash -c "if [ -f /shared/WEBAPP.TAR ]; then tar -xf /shared/WEBAPP.TAR -C /totvs/protheus/bin/appserver; elif [ -f /shared/WEBAPP.ZIP ]; then unzip -o /shared/WEBAPP.ZIP -d /totvs/protheus/bin/appserver > /dev/null; fi"
+
+# 16.2. Preenchimento dinamico do appserver.ini baseado no novo template REST
 $AppServerPort = $EnvVariables['APPSERVER_PORT']
+$LicensePort = $EnvVariables['LICENSESERVER_PORT']
+$DbName = $EnvVariables['POSTGRES_DB']
 
 $AppServerIniFile = Join-Path $ProjectRoot "docker/appserver/appserver.ini"
 $AppServerIniContent = @"
-[$DbName]
-SourcePath=/totvs/protheus/apo
-RpoCustom=/totvs/protheus/apo/tttm120_custom.rpo
+[environment]
+SourcePath=/totvs/protheus/bin/apo
+RPOCustom=/totvs/protheus/bin/apo/custom.rpo
 RootPath=/totvs/protheus_data
 StartPath=/system/
 RpoDb=top
@@ -895,7 +1013,7 @@ localdbextension=.dtc
 TopMemoMega=1
 PictFormat=DEFAULT
 RegionalLanguage=BRA
-SpecialKey=Prod
+SpecialKey=environment
 StartSysInDB=1
 
 [DBAccess]
@@ -906,14 +1024,15 @@ PROTHEUSONLY=0
 
 [General]
 CONSOLELOG=1
-CONSOLEFILE=/totvs/protheus/bin/log/appsec01.log
+CONSOLEFILE=/totvs/protheus/bin/appserver/appserver.log
 InstallPath=/totvs/
 CanAcceptFSRemote=1
 ASyncConsoleLog=0
+App_Environment=environment
 
 [Drivers]
 ACTIVE=TCP
-MultiProtocolPortSecure=1
+;MultiProtocolPortSecure=1
 MultiProtocolPort=1
 
 [TCP]
@@ -925,7 +1044,7 @@ SERVER=$LicenseServerContainer
 PORT=$LicensePort
 
 [WEBAPP]
-Port=1235
+PORT=1235
 "@
 
 $AppServerIniContent = $AppServerIniContent.Replace("`r`n", "`n")
@@ -949,7 +1068,7 @@ if ($LASTEXITCODE -ne 0) {
     Invoke-Die "Falha ao inicializar o servico do AppServer nativamente." 
 }
 
-Show-Success "AppServer configurado e inicializado com sucesso (TCP: $AppServerPort, WebApp: 1235)."
+Show-Success "AppServer configurado e inicializado com novo template (REST na porta 8080)."
 
 # ========================================================
 # 17. CONFIGURAR E INICIAR BINARIOS DO SMART VIEW (MODO RAIZ)
