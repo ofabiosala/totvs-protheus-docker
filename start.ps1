@@ -687,6 +687,49 @@ Remove-Item -LiteralPath $DbScriptPath -Force
 Show-Success "Banco de dados provisionado nativamente via script interno."
 
 # ========================================================
+# 12.1. RESTAURAR DUMP DA BASE DE DADOS (CUSTOM OU PADRAO)
+# ========================================================
+Show-Step "Verificando arquivos para populacao da base de dados..."
+
+$CustomDumpName = "custom_dump.tar"
+$DefaultDumpName = "protheus_dump.tar"
+
+$CustomDumpHostPath = Join-Path $ProjectRoot "db/backups/$CustomDumpName"
+$DefaultDumpHostPath = Join-Path $SharedDir $DefaultDumpName
+
+$FileToRestore = $null
+$ContainerRestorePath = $null
+
+# 1. Prioriza o dump customizado do usuario
+if (Test-Path -LiteralPath $CustomDumpHostPath -PathType Leaf) {
+    Write-Host "     [+] Dump customizado encontrado ($CustomDumpName). Priorizando..." -ForegroundColor Cyan
+    $FileToRestore = $CustomDumpHostPath
+    $ContainerRestorePath = "/backups/$CustomDumpName"
+}
+# 2. Faz o fallback para o dump padrao das dependencias
+elseif (Test-Path -LiteralPath $DefaultDumpHostPath -PathType Leaf) {
+    Write-Host "     [+] Dump padrao encontrado ($DefaultDumpName). Utilizando..." -ForegroundColor Cyan
+    $FileToRestore = $DefaultDumpHostPath
+    $ContainerRestorePath = "/shared/$DefaultDumpName"
+}
+
+if ($null -ne $ContainerRestorePath) {
+    Write-Host "     Restaurando banco de dados. Isso pode levar alguns minutos..." -ForegroundColor Cyan
+    
+    # -1 (transacao unica para evitar dados corrompidos) e -c (limpa tabelas existentes)
+    & docker exec -u postgres $DbContainer pg_restore -d $DbName -U postgres -c --if-exists -1 $ContainerRestorePath > $null 2>&1
+    
+    if ($LASTEXITCODE -eq 0) {
+        Show-Success "Base de dados populada com sucesso!"
+    } else {
+        Show-Fail "Falha ao restaurar o dump. Verifique a integridade do arquivo."
+        exit 1
+    }
+} else {
+    Show-Warning "Nenhum dump encontrado nas pastas db/backups ou shared. A base subira vazia."
+}
+
+# ========================================================
 # 13. VALIDAR ARQUIVOS DE BINARIOS
 # ========================================================
 
