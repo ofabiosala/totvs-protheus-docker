@@ -692,40 +692,49 @@ Show-Success "Banco de dados provisionado nativamente via script interno."
 Show-Step "Verificando arquivos para populacao da base de dados..."
 
 $CustomDumpName = "custom_dump.tar"
-$DefaultDumpName = "protheus_dump.tar"
+$DefaultDumpName = "dump_protheus.sql"
 
 $CustomDumpHostPath = Join-Path $ProjectRoot "db/backups/$CustomDumpName"
 $DefaultDumpHostPath = Join-Path $SharedDir $DefaultDumpName
 
 $FileToRestore = $null
 $ContainerRestorePath = $null
+$IsSqlScript = $false
 
 # 1. Prioriza o dump customizado do usuario
 if (Test-Path -LiteralPath $CustomDumpHostPath -PathType Leaf) {
     Write-Host "     [+] Dump customizado encontrado ($CustomDumpName). Priorizando..." -ForegroundColor Cyan
     $FileToRestore = $CustomDumpHostPath
     $ContainerRestorePath = "/backups/$CustomDumpName"
+    $IsSqlScript = ($CustomDumpName -match '\.sql$')
 }
 # 2. Faz o fallback para o dump padrao das dependencias
 elseif (Test-Path -LiteralPath $DefaultDumpHostPath -PathType Leaf) {
     Write-Host "     [+] Dump padrao encontrado ($DefaultDumpName). Utilizando..." -ForegroundColor Cyan
     $FileToRestore = $DefaultDumpHostPath
     $ContainerRestorePath = "/shared/$DefaultDumpName"
+    $IsSqlScript = ($DefaultDumpName -match '\.sql$')
 }
 
 if ($null -ne $ContainerRestorePath) {
     Write-Host "     Restaurando banco de dados. Isso pode levar alguns minutos..." -ForegroundColor Cyan
     
-    # -1 (transacao unica para evitar dados corrompidos) e -c (limpa tabelas existentes)
-    & docker exec -u postgres $DbContainer pg_restore -d $DbName -U postgres -c --if-exists -1 $ContainerRestorePath > $null 2>&1
+    if ($IsSqlScript) {
+        & docker exec -u postgres $DbContainer bash -c "psql -d $DbName -U postgres -f $ContainerRestorePath" > $null 2>&1
+    }
+    else {
+        & docker exec -u postgres $DbContainer pg_restore -d $DbName -U postgres -c --if-exists -1 $ContainerRestorePath > $null 2>&1
+    }
     
     if ($LASTEXITCODE -eq 0) {
         Show-Success "Base de dados populada com sucesso!"
-    } else {
+    }
+    else {
         Show-Fail "Falha ao restaurar o dump. Verifique a integridade do arquivo."
         exit 1
     }
-} else {
+}
+else {
     Show-Warning "Nenhum dump encontrado nas pastas db/backups ou shared. A base subira vazia."
 }
 
