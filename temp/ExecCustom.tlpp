@@ -1,0 +1,85 @@
+#include 'protheus.ch'
+#include 'parmtype.ch'
+
+/*/{Protheus.doc} ExecCustom
+Função para execução dinâmica de funções de usuário (User Functions).
+Permite digitar o nome da rotina (ex: U_CriaTabZG ou CriaTabZG) e executá-la.
+
+@type     Function
+@author   TOTVS Developer
+@since    27/10/2026
+@version  1.0
+/*/
+user function ExecCustom()
+    local oDlg        as object
+    local oGet        as object
+    local oBtnExec    as object
+    local oBtnClose   as object
+    local cFuncao     as character
+
+    cFuncao := Space(40)
+
+    // Criação da janela de diálogo simples
+    DEFINE MSDIALOG oDlg TITLE "Executar Customização" FROM 0, 0 TO 160, 420 PIXEL
+
+        @ 012, 015 SAY "Nome da Rotina/User Function:" SIZE 120, 008 PIXEL OF oDlg
+        @ 025, 015 MSGET oGet VAR cFuncao SIZE 180, 011 PIXEL OF oDlg PICTURE "@!"
+
+        // Botões de ação
+        @ 050, 080 BUTTON oBtnExec PROMPT "&Executar" SIZE 050, 015 PIXEL OF oDlg ;
+            ACTION ( ValidaEExecuta(AllTrim(cFuncao)), oDlg:End() )
+
+        @ 050, 140 BUTTON oBtnClose PROMPT "&Fechar" SIZE 050, 015 PIXEL OF oDlg ;
+            ACTION ( oDlg:End() ) CANCEL
+
+    ACTIVATE MSDIALOG oDlg CENTERED
+
+return nil
+
+/*/{Protheus.doc} ValidaEExecuta
+Valida a existência da rotina no RPO e realiza a chamada dinâmica.
+@param cNomeFunc, Caractere, Nome da rotina informada pelo usuário.
+/*/
+static function ValidaEExecuta(cNomeFunc as character)
+    local cChamada   as character
+    local bBloco     as codeblock
+    local bErroAnt   as codeblock
+    local lErro      as logical
+    local cMsgErro   as character
+
+    if Empty(cNomeFunc)
+        MsgAlert("Por favor, digite o nome de uma rotina.", "Atenção")
+        return .F.
+    endif
+
+    cChamada := AllTrim(cNomeFunc)
+
+    // Se não informou o prefixo U_, valida se existe com U_
+    if !(Upper(SubStr(cChamada, 1, 2)) == "U_")
+        if FindFunction("U_" + cChamada)
+            cChamada := "U_" + cChamada
+        endif
+    endif
+
+    // Verifica se a função existe no RPO compilado
+    if !FindFunction(cChamada)
+        MsgStop("A função '" + cChamada + "' não foi encontrada no RPO!", "Função Inexistente")
+        return .F.
+    endif
+
+    // Tratamento de erro na execução da rotina
+    lErro    := .F.
+    cMsgErro := ""
+    bErroAnt := ErrorBlock({|e| lErro := .T., cMsgErro := e:Description, Break(e)})
+
+    Begin Sequence
+        bBloco := &( "{|| " + cChamada + "() }" )
+        Eval(bBloco)
+    Recover
+        ErrorBlock(bErroAnt)
+        MsgStop("Ocorreu um erro durante a execução da função '" + cChamada + "':" + CRLF + cMsgErro, "Erro de Execução")
+        return .F.
+    End Sequence
+
+    ErrorBlock(bErroAnt)
+return .T.

@@ -1,0 +1,24 @@
+==========================================================================
+COMO FAZER UM "DUMP", OU SEJA, UM BACKUP DO ESTADO ATUAL DA BASE DE DADOS?
+==========================================================================
+
+- Acesse o terminal e execute o seguinte comando abaixo. Este comando irá exportar um script ".sql" contendo toda a estrutura atual da base de dados e compatível com a versão do PostgreSQL instalada no container (16) para o diretório compartilhado "/shared".
+
+docker exec -t tp-db /usr/lib/postgresql/16/bin/pg_dump -U postgres -d protheus -F p --inserts --no-owner --no-privileges -f /shared/dump_protheus.sql
+
+===========================================================================
+QUAIS EXPRESSÕES SÃO UTILIZADAS PARA EFETUAR UMA CÓPIA DOS DADOS VIA APSDU?
+===========================================================================
+
+SX2 => SubStr(X2_CHAVE, 1, 3) $ "ZG1,ZG4,ZG7,ZG8,ZG9,ZGA,ZGD,ZGH,ZGI,ZGL,ZGN,ZGO,ZGQ,ZGR,ZGS,ZGU,ZGV,ZGW,ZGX,ZGY,ZGZ" .And. !Deleted()
+SX3 => SubStr(X3_ARQUIVO, 1, 3) $ "ZG1,ZG4,ZG7,ZG8,ZG9,ZGA,ZGD,ZGH,ZGI,ZGL,ZGN,ZGO,ZGQ,ZGR,ZGS,ZGU,ZGV,ZGW,ZGX,ZGY,ZGZ" .And. !Deleted()
+SIX => SubStr(INDICE, 1, 3) $ "ZG1,ZG4,ZG7,ZG8,ZG9,ZGA,ZGD,ZGH,ZGI,ZGL,ZGN,ZGO,ZGQ,ZGR,ZGS,ZGU,ZGV,ZGW,ZGX,ZGY,ZGZ" .And. !Deleted()
+SX6 => SubStr(X6_VAR, 1, 6) == "MV_YCQ" .And. !Deleted()
+
+===========================================================================
+COMO EFETUAR UM "BUILD" DOS ARQUIVOS FRONT-END PARA PRODUÇÃO?
+===========================================================================
+
+docker exec -it sgcq-web bash
+
+npm run build:prod

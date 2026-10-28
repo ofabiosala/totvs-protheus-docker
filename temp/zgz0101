@@ -1,0 +1,197 @@
+  000001       TIPOS DE ANALISE                                                           1
+  000006       PADROES REGULATORIOS                                                       1
+  000007       SCHEMAS DE E-MAILS                                                         1
+  000008       SCHEMAS DE NOTIFICACOES                                                    1
+  000010       MODALIDADES DE TRANSPORTE                                                  1
+  000012       MOTIVOS DE CANCELAMENTO DE SOLICITACAO DE ANALISE                          1
+  000013       CLIENTES                                                                   1
+  000014       TIPOS DE AMOSTRA                                                           1
+  000015       PAISES                                                                     1
+  000016       DISPOSIÇÕES DE NÃO CONFORMIDADE DE AMOSTRAS                                1
+  001AL        ALERGÉNICA                                                                 1
+  001FQ        FÍSICO-QUÍMICA                                                             1
+  001MB        MICROBIOLÓGICA                                                             1
+  006EUA       ESTADOS UNIDOS                                                             1
+  006IN60      INSTRUÇÃO NORMATIVA SDA/MAPA 60/2018                                       1
+  006UE        UNIÃO EUROPEIA                                                             1
+  007201       CANCELAMENTO DE SOLICITACAO DE ANALISE                                     1
+  007301       DESPACHO DE AMOSTRAS                                                       1
+  007302       NAO CONFORMIDADE DE AMOSTRAS                                               1
+  007601       CONCLUSÃO DE SOLICITAÇÃO DE ANÁLISE                                        1
+  008101       BOAS VINDAS AO NOVO USUARIO                                                1
+  008201       CANCELAMENTO DE SOLICITACAO DE ANALISE                                     1
+  008301       DESPACHO DE AMOSTRAS                                                       1
+  008302       NAO CONFORMIDADE DE AMOSTRAS                                               1
+  008601       CONCLUSÃO DE SOLICITAÇÃO DE ANÁLISE                                        1
+  01001        DESLOCAMENTO INTERNO                                                       1
+  01002        VEÍCULO PRÓPRIO                                                            1
+  01003        VEÍCULO DE TERCEIRO                                                        1
+  012001       DESISTENCIA DA ANALISE PELO CLIENTE                                        1
+  012021       NÃO CONFORMIDADE DE AMOSTRAS PARA ANÁLISE                                  1
+  013024631-01 FRISA - TEIXEIRA DE FREITAS/BA - SIF 3448                                  1
+  013099904-01 FRISA - COLATINA/ES - SIF 0506                                             1
+  013099904-02 FRISA - NANUQUE/MG - SIF 2051                                              1
+  014AGPO      ÁGUA POTÁVEL                                                               1
+  014ARAM      AR AMBIENTE                                                                1
+  014CABV      CARCAÇA BOVINA                                                             1
+  014CNBV      CARNE BOVINA                                                               1
+  014CNFG      CARNE DE FRANGO                                                            1
+  014CNSN      CARNE SUÍNA                                                                1
+  014INSU      INSUMO                                                                     1
+  014PFIN      PRODUTO FINAL - INDÚSTRIA                                                  1
+  014SWEQ      SWAB TEST EM SUPERFÍCIE DE CONTATO - EQUIPAMENTOS                          1
+  014SWOP      SWAB TEST EM SUPERFÍCIE DE CONTATO - OPERACIONAL                           1
+  014SWPR      SWAB TEST EM SUPERFÍCIE DE CONTATO - PRÉ OPERACIONAL                       1
+  014SWUN      SWAB TEST EM SUPERFÍCIE DE CONTATO - UNIFORMES                             1
+  015013       AFEGANISTAO                                                                1
+  015017       ALBANIA                                                                    1
+  015023       ALEMANHA                                                                   1
+  015031       BURKINA FASO                                                               1
+  015037       ANDORRA                                                                    1
+  015040       ANGOLA                                                                     1
+  015041       ANGUILLA                                                                   1
+  015043       ANTIGUA E BARBUDA                                                          1
+  015053       ARABIA SAUDITA                                                             1
+  015059       ARGELIA                                                                    1
+  015063       ARGENTINA                                                                  1
+  015064       ARMENIA                                                                    1
+  015065       ARUBA                                                                      1
+  015069       AUSTRALIA                                                                  1
+  015072       AUSTRIA                                                                    1
+  015073       AZERBAIJAO                                                                 1
+  015077       BAHAMAS                                                                    1
+  015080       BAHREIN                                                                    1
+  015081       BANGLADESH                                                                 1
+  015083       BARBADOS                                                                   1
+  015085       BELARUS                                                                    1
+  015087       BELGICA                                                                    1
+  015088       BELIZE                                                                     1
+  015090       BERMUDAS                                                                   1
+  015097       BOLIVIA                                                                    1
+  015098       BOSNIA-HERZEGOVINA                                                         1
+  015101       BOTSUANA                                                                   1
+  015105       BRASIL                                                                     1
+  015108       BRUNEI                                                                     1
+  015111       BULGARIA                                                                   1
+  015115       BURUNDI                                                                    1
+  015119       BUTAO                                                                      1
+  015127       CABO VERDE                                                                 1
+  015141       CAMBOJA                                                                    1
+  015145       CAMAROES                                                                   1
+  015149       CANADA                                                                     1
+  015153       CAZAQUISTAO                                                                1
+  015154       CATAR                                                                      1
+  015158       CHILE                                                                      1
+  015160       CHINA                                                                      1
+  015163       CHIPRE                                                                     1
+  015169       COLOMBIA                                                                   1
+  015173       COMORES                                                                    1
+  015177       CONGO                                                                      1
+  015187       COREIA DO NORTE                                                            1
+  015190       COREIA DO SUL                                                              1
+  015193       COSTA DO MARFIM                                                            1
+  015195       CROACIA                                                                    1
+  015196       COSTA RICA                                                                 1
+  015199       CUBA                                                                       1
+  015200       CURACAO                                                                    1
+  015229       BENIN                                                                      1
+  015232       DINAMARCA                                                                  1
+  015235       DOMINICA                                                                   1
+  015239       EQUADOR                                                                    1
+  015240       EGITO                                                                      1
+  015244       EMIRADOS ARABES UNIDOS                                                     1
+  015245       ESPANHA                                                                    1
+  015246       ESLOVENIA                                                                  1
+  015247       ESLOVAQUIA                                                                 1
+  015249       ESTADOS UNIDOS                                                             1
+  015251       ESTONIA                                                                    1
+  015253       ETIOPIA                                                                    1
+  015267       FILIPINAS                                                                  1
+  015271       FINLANDIA                                                                  1
+  015275       FRANCA                                                                     1
+  015281       GABAO                                                                      1
+  015289       GANA                                                                       1
+  015291       GEORGIA                                                                    1
+  015301       GRECIA                                                                     1
+  015317       GUATEMALA                                                                  1
+  015325       GUIANA FRANCESA                                                            1
+  015337       GUIANA                                                                     1
+  015341       HAITI                                                                      1
+  015345       HONDURAS                                                                   1
+  015351       HONG KONG                                                                  1
+  015355       HUNGRIA                                                                    1
+  015357       IEMEN                                                                      1
+  015361       INDIA                                                                      1
+  015365       INDONESIA                                                                  1
+  015369       IRAQUE                                                                     1
+  015372       IRA                                                                        1
+  015375       IRLANDA                                                                    1
+  015379       ISLANDIA                                                                   1
+  015383       ISRAEL                                                                     1
+  015386       ITALIA                                                                     1
+  015391       JAMAICA                                                                    1
+  015399       JAPAO                                                                      1
+  015403       JORDANIA                                                                   1
+  015426       LESOTO                                                                     1
+  015427       LETONIA                                                                    1
+  015431       LIBANO                                                                     1
+  015434       LIBERIA                                                                    1
+  015438       LIBIA                                                                      1
+  015442       LITUANIA                                                                   1
+  015445       LUXEMBURGO                                                                 1
+  015447       MACAU                                                                      1
+  015449       MACEDONIA DO NORTE                                                         1
+  015450       MADAGASCAR                                                                 1
+  015455       MALASIA                                                                    1
+  015467       MALI                                                                       1
+  015474       MALTA                                                                      1
+  015485       MARROCOS                                                                   1
+  015493       MAURITANIA                                                                 1
+  015505       MOCAMBIQUE                                                                 1
+  015507       MOLDAVIA                                                                   1
+  015517       MONGOLIA                                                                   1
+  015531       MEXICO                                                                     1
+  015548       NOVA ZELANDIA                                                              1
+  015556       OMA                                                                        1
+  015565       PERU                                                                       1
+  015573       HOLANDA (PAISES BAIXOS)                                                    1
+  015580       PANAMA                                                                     1
+  015586       PARAGUAI                                                                   1
+  015603       POLONIA                                                                    1
+  015607       PORTUGAL                                                                   1
+  015611       QUENIA                                                                     1
+  015640       REPUBLICA CHECA                                                            1
+  015647       REPUBLICA DOMINICANA                                                       1
+  015670       ROMENIA                                                                    1
+  015675       RUANDA                                                                     1
+  015676       RUSSIA                                                                     1
+  015687       EL SALVADOR                                                                1
+  015690       SERVIA                                                                     1
+  015731       SIRIA                                                                      1
+  015741       CINGAPURA                                                                  1
+  015744       SOMALIA                                                                    1
+  015748       SRI LANKA                                                                  1
+  015756       AFRICA DO SUL                                                              1
+  015764       SUICA                                                                      1
+  015767       SURINAME                                                                   1
+  015770       SUECIA                                                                     1
+  015772       TADJIQUISTAO                                                               1
+  015776       TAILANDIA                                                                  1
+  015780       TANZANIA                                                                   1
+  015788       CHADE                                                                      1
+  015800       TOGO                                                                       1
+  015810       TRINIDAD E TOBAGO                                                          1
+  015815       TUNISIA                                                                    1
+  015820       TURCOMENISTAO                                                              1
+  015827       TURQUIA                                                                    1
+  015828       REINO UNIDO                                                                1
+  015831       UCRANIA                                                                    1
+  015833       UGANDA                                                                     1
+  015845       URUGUAI                                                                    1
+  015847       UZBEQUISTAO                                                                1
+  015850       VENEZUELA                                                                  1
+  015858       VIETNA                                                                     1
+  015890       ZAMBIA                                                                     1
+  015895       ZIMBABUE                                                                   1
+  01601        APROVADA (COM RESSALVA)                                                    1
+  01602        REJEITADA                                                                  1

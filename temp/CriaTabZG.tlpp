@@ -1,0 +1,176 @@
+#include 'protheus.ch'
+#include 'parmtype.ch'
+
+/*/{Protheus.doc} CriaTabZG
+Rotina para exibição das tabelas no intervalo ZG0 até ZGZ cadastradas
+no dicionário SX2, permitindo selecionar via Checkbox/Marcação e
+executar a criação física no banco de dados via ChkFile().
+
+@type     Function
+@author   TOTVS Developer
+@since    27/10/2026
+@version  1.2
+/*/
+user function CriaTabZG()
+    local aTabelas    as array
+    local aHeader     as array
+    local oDlg        as object
+    local oList       as object
+    local oBtnExec    as object
+    local oBtnClose   as object
+    local oBtnAll     as object
+    local oBtnInvert  as object
+
+    // Carrega tabelas do range ZG0 a ZGZ a partir do SX2 usando Embedded SQL
+    aTabelas := CarregaSX2ZG()
+
+    if Len(aTabelas) == 0
+        MsgInfo("Nenhuma tabela encontrada no range ZG0 a ZGZ no SX2." + CRLF + CRLF + ;
+                "Verifique se os registros foram incluídos no dicionário SX2.", "Aviso")
+        return nil
+    endif
+
+    // Definição das colunas da listagem
+    aHeader := {;
+        {"",          "MARCA",  "L", 02, 0, "@!"},;
+        {"Tabela",    "TABELA", "C", 06, 0, "@!"},;
+        {"Descrição", "NOME",   "C", 40, 0, "@!"};
+    }
+
+    DEFINE MSDIALOG oDlg TITLE "Criação Física de Tabelas (ZG0 a ZGZ)" FROM 0, 0 TO 400, 600 PIXEL
+
+        // Painel / ListBox com coluna de marcação
+        @ 010, 010 LISTBOX oList FIELDS HEADER aHeader[1,1], aHeader[2,1], aHeader[3,1] ;
+            SIZE 280, 150 PIXEL OF oDlg
+
+        // Configura fonte de dados do ListBox
+        oList:SetArray(aTabelas)
+        oList:bLine := {|| { ;
+            IIf(aTabelas[oList:nAt, 1], " [ X ] ", " [  ] "), ;
+            aTabelas[oList:nAt, 2], ;
+            aTabelas[oList:nAt, 3] ;
+        }}
+
+        // Duplo clique ou barra de espaço para alternar marcação
+        oList:bLDblClick := {|| aTabelas[oList:nAt, 1] := !aTabelas[oList:nAt, 1], oList:Refresh() }
+
+        // Botões de marcação rápida
+        @ 165, 010 BUTTON oBtnAll PROMPT "Marcar Todos" SIZE 055, 013 PIXEL OF oDlg ;
+            ACTION ( AEval(aTabelas, {|x| x[1] := .T.}), oList:Refresh() )
+
+        @ 165, 070 BUTTON oBtnInvert PROMPT "Inverter Seleção" SIZE 060, 013 PIXEL OF oDlg ;
+            ACTION ( AEval(aTabelas, {|x| x[1] := !x[1]}), oList:Refresh() )
+
+        // Botões de Executar e Fechar
+        @ 165, 175 BUTTON oBtnExec PROMPT "&Executar" SIZE 050, 014 PIXEL OF oDlg ;
+            ACTION ( ExecutaCriacao(aTabelas), oDlg:End() )
+
+        @ 165, 235 BUTTON oBtnClose PROMPT "&Fechar" SIZE 050, 014 PIXEL OF oDlg ;
+            ACTION ( oDlg:End() ) CANCEL
+
+    ACTIVATE MSDIALOG oDlg CENTERED
+
+return nil
+
+/*/{Protheus.doc} CarregaSX2ZG
+Carrega as tabelas no intervalo ZG0 a ZGZ diretamente do SX2
+utilizando Embedded SQL (BeginSql / EndSql).
+@return aTabs, Array com estrutura: {{.F., "ZG1", "Descricao"}, ...}
+/*/
+static function CarregaSX2ZG() as array
+    local aTabs      as array
+    local cAliasQ    as character
+    local cChave     as character
+    local cNome      as character
+
+    aTabs   := {}
+    cAliasQ := GetNextAlias()
+
+    // Embedded SQL com sintaxe nativa Protheus (%table% e %notDel%)
+    BeginSql alias cAliasQ
+        SELECT 
+            SX2.X2_CHAVE, 
+            SX2.X2_NOME
+        FROM 
+            %table:SX2% SX2
+        WHERE 
+            SX2.%notDel%
+            AND SX2.X2_CHAVE LIKE 'ZG%'
+        ORDER BY 
+            SX2.X2_CHAVE
+    EndSql
+
+    While (cAliasQ)->(!Eof())
+        cChave := AllTrim((cAliasQ)->X2_CHAVE)
+        cNome  := AllTrim((cAliasQ)->X2_NOME)
+
+        // Assegura que o prefixo seja ZG
+        if Upper(SubStr(cChave, 1, 2)) == "ZG"
+            AAdd(aTabs, {.F., cChave, cNome})
+        endif
+
+        (cAliasQ)->(DbSkip())
+    EndDo
+
+    (cAliasQ)->(DbCloseArea())
+
+return aTabs
+
+/*/{Protheus.doc} ExecutaCriacao
+Filtra as tabelas marcadas, armazena no array e executa ChkFile() para cada uma.
+@param aTabelas, Array com todas as tabelas e estado da marcação.
+/*/
+static function ExecutaCriacao(aTabelas as array)
+    local aSelecionadas as array
+    local nI            as numeric
+    local cTab          as character
+    local nCountSucesso as numeric
+    local cLog          as character
+
+    aSelecionadas := {}
+    nCountSucesso := 0
+    cLog          := ""
+
+    // 1. Armazena todas as opções selecionadas em um array
+    For nI := 1 To Len(aTabelas)
+        if aTabelas[nI, 1] == .T.
+            AAdd(aSelecionadas, aTabelas[nI, 2])
+        endif
+    Next nI
+
+    // Valida se houve ao menos uma tabela selecionada
+    if Len(aSelecionadas) == 0
+        MsgAlert("Nenhuma tabela foi selecionada para criação.", "Atenção")
+        return nil
+    endif
+
+    if !MsgYesNo("Deseja executar a verificação/criação física de " + cValToChar(Len(aSelecionadas)) + " tabela(s)?", "Confirmação")
+        return nil
+    endif
+
+    // Exibe régua de processamento
+    ProcRegua(Len(aSelecionadas))
+
+    // 2. Percorre o array chamando ChkFile(cTab) para cada tabela
+    For nI := 1 To Len(aSelecionadas)
+        cTab := aSelecionadas[nI]
+        IncProc("Verificando/Criando tabela: " + cTab + " (" + cValToChar(nI) + "/" + cValToChar(Len(aSelecionadas)) + ")...")
+
+        // ChkFile cria a tabela fisicamente e seus índices se não existirem
+        if ChkFile(cTab)
+            nCountSucesso++
+            cLog += "- " + cTab + ": Criada/Validada com sucesso." + CRLF
+        else
+            cLog += "- " + cTab + ": Falha ao verificar/criar tabela." + CRLF
+        endif
+    Next nI
+
+    // Exibe resultado final
+    cLog := "Processamento concluído!" + CRLF ;
+          + "Total selecionadas: " + cValToChar(Len(aSelecionadas)) + CRLF ;
+          + "Sucesso: " + cValToChar(nCountSucesso) + CRLF + CRLF ;
+          + "Detalhes:" + CRLF + cLog
+
+    ApMsgInfo(cLog, "Resultado ChkFile")
+
+return nil
