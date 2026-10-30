@@ -22,3 +22,15 @@ COMO EFETUAR UM "BUILD" DOS ARQUIVOS FRONT-END PARA PRODUÇÃO?
 docker exec -it sgcq-web bash
 
 npm run build:prod
+
+===========================================================================
+COMO ACOMPANHAR EM TEMPO REAL OS LOGS DO APPSERVER?
+===========================================================================
+
+docker exec -it tp-appserver tail -n 100 -f /totvs/protheus/bin/appserver/appserver.log
+
+===========================================================================
+LINKS ÚTEIS
+===========================================================================
+
+Usuário de Serviço: https://tdn.totvs.com/pages/releaseview.action?pageId=1072703211
