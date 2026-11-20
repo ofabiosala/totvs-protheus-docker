@@ -1,0 +1,11 @@
+.env
+/db/data/
+/db/backups/
+/shared/
+/protheus_data/
+/includes/
+/docker/
+/config/*
+!/config/download.json
+*.tar
+*.zip

@@ -27,7 +27,7 @@ npm run build:prod
 COMO ACOMPANHAR EM TEMPO REAL OS LOGS DO APPSERVER?
 ===========================================================================
 
-docker exec -it tp-appserver tail -n 100 -f /totvs/protheus/bin/appserver/appserver.log
+docker exec -it tp-appserver tail -n 99999 -f /totvs/protheus/bin/appserver/appserver.log
 
 ===========================================================================
 LINKS ÚTEIS
